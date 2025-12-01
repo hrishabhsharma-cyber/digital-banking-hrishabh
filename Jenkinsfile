@@ -60,16 +60,19 @@ pipeline {
             steps {
                 script {
                     def portInfo = sh(
-                        script: "docker ps --format '{{.Ports}}' --filter \"name=digital-banking-blue\"",
+                        script: "docker ps --format \"{{.Ports}}\" --filter \"name=digital-banking-blue\"",
                         returnStdout: true
                     ).trim()
 
-                    if (portInfo.contains("4001->")) {
-                        env.BLUE_PORT   = "4001"
+                    echo "DEBUG: docker ps Ports Output: ${portInfo}"
+                    if (portInfo.contains("4001->5000")) {
+                        env.BLUE_PORT = "4001"
                         env.CANARY_PORT = "4003"
-                    } else {
-                        env.BLUE_PORT   = "4003"
+                    } else if (portInfo.contains("4003->5000")) {
+                        env.BLUE_PORT = "4003"
                         env.CANARY_PORT = "4001"
+                    } else {
+                        error "❌ Could not detect BLUE port. 'digital-banking-blue' container may not be running."
                     }
 
                     echo "BLUE_PORT = ${env.BLUE_PORT}"
