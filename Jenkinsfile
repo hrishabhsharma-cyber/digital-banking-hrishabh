@@ -26,5 +26,26 @@ pipeline {
                 '''
             }
         }
+
+        stage('Docker Build') {
+            steps {
+                sh "docker build -t hrishabhambak/digital-banking-hrishabh:${env.BUILD_NUMBER} ."
+            }
+        }
+
+        stage('Docker Push') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: 'dockerhub-credentials',
+                    usernameVariable: 'DOCKER_USER',
+                    passwordVariable: 'DOCKER_PASS'
+                )]) {
+                    sh """
+                        echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
+                        docker push hrishabhambak/digital-banking-hrishabh:${env.BUILD_NUMBER}
+                    """
+                }
+            }
+        }
     }
 }
