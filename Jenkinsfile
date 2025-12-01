@@ -25,13 +25,13 @@ pipeline {
 
         stage('Build App') {
             steps {
-                sh '''
+                sh """
                     npm run build > build.log 2>&1 || {
                         echo "Build failed"
                         cp build.log error.log
                         exit 1
                     }
-                '''
+                """
             }
         }
 
@@ -48,10 +48,10 @@ pipeline {
                     usernameVariable: 'DOCKER_USER',
                     passwordVariable: 'DOCKER_PASS'
                 )]) {
-                    sh '''
+                    sh """
                         echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
                         docker push $IMAGE_NAME:${BUILD_NUMBER}
-                    '''
+                    """
                 }
             }
         }
@@ -82,19 +82,19 @@ pipeline {
 
         stage('Cleanup Previous Canary') {
             steps {
-                sh '''
+                sh """
                     docker stop digital-banking-canary 2>/dev/null || true
                     docker rm   digital-banking-canary 2>/dev/null || true
 
                     docker ps -q  --filter "publish=${CANARY_PORT}" | xargs -r docker stop || true
                     docker ps -aq --filter "publish=${CANARY_PORT}" | xargs -r docker rm   || true
-                '''
+                """
             }
         }
 
         stage('Start Canary') {
             steps {
-                sh '''
+                sh """
                     docker run -d \
                         --name digital-banking-canary \
                         -p ${CANARY_PORT}:5000 \
@@ -102,7 +102,7 @@ pipeline {
                         $IMAGE_NAME:${BUILD_NUMBER}
 
                     sleep 7
-                '''
+                """
             }
         }
 
@@ -123,12 +123,12 @@ pipeline {
 
         stage('Traffic Split 90/10') {
             steps {
-                sh '''
+                sh """
                     sudo sed -i "s/server 127.0.0.1:${BLUE_PORT} weight=[0-9]*/server 127.0.0.1:${BLUE_PORT} weight=90/" /etc/nginx/sites-available/nest-proxy.conf
                     sudo sed -i "s/server 127.0.0.1:${CANARY_PORT} weight=[0-9]*/server 127.0.0.1:${CANARY_PORT} weight=10/" /etc/nginx/sites-available/nest-proxy.conf
                     sudo systemctl reload nginx
                     sleep 10
-                '''
+                """
             }
         }
 
@@ -149,41 +149,41 @@ pipeline {
 
         stage('Promote 100% Canary') {
             steps {
-                sh '''
+                sh """
                     sudo sed -i "s/server 127.0.0.1:${BLUE_PORT} weight=[0-9]*/server 127.0.0.1:${BLUE_PORT} weight=1/"   /etc/nginx/sites-available/nest-proxy.conf
                     sudo sed -i "s/server 127.0.0.1:${CANARY_PORT} weight=[0-9]*/server 127.0.0.1:${CANARY_PORT} weight=100/" /etc/nginx/sites-available/nest-proxy.conf
                     sudo systemctl reload nginx
-                '''
+                """
             }
         }
 
         stage('Promote Canary to Blue') {
             steps {
-                sh '''
+                sh """
                     docker stop digital-banking-blue || true
                     docker rm   digital-banking-blue || true
                     docker rename digital-banking-canary digital-banking-blue
-                '''
+                """
             }
         }
 
         stage('Save LAST_SUCCESS Version') {
             steps {
-                sh '''
+                sh """
                     echo "${BUILD_NUMBER}" > $LAST_SUCCESS_FILE
                     echo "Saved stable version: ${BUILD_NUMBER}"
-                '''
+                """
             }
         }
     }
 
     post {
         failure {
-            sh '''
+            sh """
                 echo "❌ Pipeline failed — ensuring rollback safety."
                 docker stop digital-banking-canary || true
                 docker rm   digital-banking-canary || true
-            '''
+            """
         }
 
         success {
