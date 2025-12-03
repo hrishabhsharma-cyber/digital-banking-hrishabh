@@ -60,31 +60,33 @@ pipeline {
             steps {
                 script {
                     echo "▶ Detecting active BLUE port..."
-
+        
                     def blue = sh(
                         script: """
                             CID=\$(docker ps --filter "name=digital-banking-blue" --format "{{.ID}}" | head -n 1)
-
+        
                             if [ -z "\$CID" ]; then
                                 echo "NO_CONTAINER"
                                 exit 0
                             fi
-
+        
                             docker inspect \$CID --format '{{json .NetworkSettings.Ports}}' \
-                            | grep -o '"HostPort":"[0-9]*"' \
+                            | grep -o \\\"HostPort\\\":\\\"[0-9]*\\\" \
                             | head -n 1 \
-                            | sed 's/"HostPort":"//; s/"//'
+                            | sed 's/.*"HostPort":"//; s/"//'
                         """,
                         returnStdout: true
                     ).trim()
-
+        
+                    echo "BLUE extracted raw: '${blue}'"
+        
                     if (blue == "" || blue == "NO_CONTAINER" || !blue.isInteger()) {
                         error "❌ Failed to detect BLUE_PORT. Extracted: '${blue}'"
                     }
-
+        
                     env.BLUE_PORT = blue
                     env.CANARY_PORT = (blue == "4001") ? "4003" : "4001"
-
+        
                     echo "✔ BLUE_PORT  = ${env.BLUE_PORT}"
                     echo "✔ CANARY_PORT = ${env.CANARY_PORT}"
 
