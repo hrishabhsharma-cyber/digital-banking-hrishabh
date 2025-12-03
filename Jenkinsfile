@@ -61,34 +61,33 @@ pipeline {
                 script {
                 
                     echo "▶ Checking running BLUE container..."
-
-                    // Get Ports output exactly as shown in Jenkins logs
+        
+                    // Get port info
                     def portInfo = sh(
                         script: "docker ps --filter 'name=digital-banking-blue' --format '{{.Ports}}'",
                         returnStdout: true
                     ).trim()
-
+        
                     echo "DEBUG: docker ps Ports Output: ${portInfo}"
-
+        
                     if (!portInfo || portInfo == "") {
                         error "❌ No port info found. digital-banking-blue container may not be running."
                     }
-
-                    // --- Extract the HOST port in front of ->5000 ---
-                    // Matches: 0.0.0.0:4001->5000/tcp
-                    def matcher = (portInfo =~ /0\.0\.0\.0:(\d+)->5000/)
-
-                    if (!matcher || matcher.count == 0) {
-                        error "❌ Could not parse BLUE port from output: ${portInfo}"
+        
+                    // Regex matcher (sandbox-safe)
+                    def matcher = portInfo =~ /0\.0\.0\.0:(\d+)->5000/
+        
+                    if (!matcher.find()) {
+                        error "❌ Could not parse BLUE port from: ${portInfo}"
                     }
-
-                    env.BLUE_PORT = matcher[0][1]  // captured host port
+        
+                    // Extract captured port
+                    env.BLUE_PORT = matcher.group(1)
                     env.CANARY_PORT = (env.BLUE_PORT == "4001") ? "4003" : "4001"
-
+        
                     echo "✔ BLUE_PORT = ${env.BLUE_PORT}"
                     echo "✔ CANARY_PORT = ${env.CANARY_PORT}"
-
-                    // Make rollback folder
+        
                     sh "mkdir -p $ROLLBACK_DIR"
                 }
             }
