@@ -308,8 +308,10 @@ pipeline {
         stage('Health Check #2 - During Split') {
             steps {
                 script {
-                    def props = readFile("${env.WORKSPACE}/ports.properties")
-                    def canaryPort = (props =~ /CANARY_PORT=(\d+)/)[0][1]
+                    def canaryPort = sh(
+                        script: "grep CANARY_PORT ${env.WORKSPACE}/ports.properties | cut -d= -f2",
+                        returnStdout: true
+                    ).trim()
                     
                     echo "▶ Monitoring canary health during traffic split..."
                     
@@ -342,9 +344,15 @@ pipeline {
         stage('Promote to 100% Canary') {
             steps {
                 script {
-                    def props = readFile("${env.WORKSPACE}/ports.properties")
-                    def bluePort = (props =~ /BLUE_PORT=(\d+)/)[0][1]
-                    def canaryPort = (props =~ /CANARY_PORT=(\d+)/)[0][1]
+                    def bluePort = sh(
+                        script: "grep BLUE_PORT ${env.WORKSPACE}/ports.properties | cut -d= -f2",
+                        returnStdout: true
+                    ).trim()
+                    
+                    def canaryPort = sh(
+                        script: "grep CANARY_PORT ${env.WORKSPACE}/ports.properties | cut -d= -f2",
+                        returnStdout: true
+                    ).trim()
                     
                     echo "▶ Promoting canary to 100% traffic..."
                     
@@ -367,8 +375,10 @@ pipeline {
         stage('Final Health Check') {
             steps {
                 script {
-                    def props = readFile("${env.WORKSPACE}/ports.properties")
-                    def canaryPort = (props =~ /CANARY_PORT=(\d+)/)[0][1]
+                    def canaryPort = sh(
+                        script: "grep CANARY_PORT ${env.WORKSPACE}/ports.properties | cut -d= -f2",
+                        returnStdout: true
+                    ).trim()
                     
                     echo "▶ Running final health check at 100% traffic..."
                     
@@ -407,8 +417,10 @@ pipeline {
         stage('Save Success State') {
             steps {
                 script {
-                    def props = readFile("${env.WORKSPACE}/ports.properties")
-                    def bluePort = (props =~ /BLUE_PORT=(\d+)/)[0][1]
+                    def bluePort = sh(
+                        script: "grep BLUE_PORT ${env.WORKSPACE}/ports.properties | cut -d= -f2",
+                        returnStdout: true
+                    ).trim()
                     
                     echo "▶ Saving successful deployment state..."
                     
