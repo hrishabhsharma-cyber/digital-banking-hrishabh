@@ -1,5 +1,6 @@
 pipeline {
     agent any
+
     environment {
         IMAGE_NAME    = "hrishabhambak/digital-banking-hrishabh"
         ROLLBACK_DIR  = "/var/lib/jenkins/rollback"
@@ -7,7 +8,6 @@ pipeline {
         BLUE_PORT     = ""        // MUST USE = and MUST be valid syntax
         CANARY_PORT   = ""
     }
-
 
     stages {
 
