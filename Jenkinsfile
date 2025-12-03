@@ -64,7 +64,7 @@ pipeline {
 
                     def blue = sh(
                         script: """
-                            docker ps --filter 'name=^digital-banking-blue$' --format '{{.Ports}}' |
+                            docker ps --filter 'name=^digital-banking-blue\$' --format '{{.Ports}}' |
                             awk -F':' '{print \$2}' | awk -F'->' '{print \$1}'
                         """,
                         returnStdout: true
