@@ -1,15 +1,21 @@
 pipeline {
     agent any
-
     environment {
-        IMAGE_NAME       = "hrishabhambak/digital-banking-hrishabh"
-        ROLLBACK_DIR     = "/var/lib/jenkins/rollback"
+        IMAGE_NAME    = "hrishabhambak/digital-banking-hrishabh"
+        ROLLBACK_DIR  = "/var/lib/jenkins/rollback"
         LAST_SUCCESS_FILE = "/var/lib/jenkins/rollback/LAST_SUCCESS"
-        BLUE_PORT  = ""
-        CANARY_PORT = ""
+        BLUE_PORT     = ""        // MUST USE = and MUST be valid syntax
+        CANARY_PORT   = ""
     }
 
+
     stages {
+
+        stage('Initial Env Check') {
+            steps {
+                echo "INIT: BLUE_PORT=$BLUE_PORT, CANARY_PORT=$CANARY_PORT"
+            }
+        }
 
         stage('Checkout') {
             steps {
