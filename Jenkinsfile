@@ -62,23 +62,22 @@ pipeline {
                     echo "▶ Checking running BLUE container..."
 
                     def portInfo = sh(
-                        script: "docker ps --filter 'name=digital-banking-blue' --format '{{.Ports}}'",
+                        script: "docker ps --filter 'name=^digital-banking-blue\$' --format '{{.Ports}}'",
                         returnStdout: true
                     ).trim()
 
                     echo "DEBUG: docker ps Ports Output: ${portInfo}"
 
                     if (!portInfo) {
-                        error "❌ No port info — digital-banking-blue is not running."
+                        error "❌ No port info — the digital-banking-blue container is not running."
                     }
 
-                    // SPLIT-based extraction (no matcher/regex objects)
-                    def firstSegment = portInfo.split(',')[0].trim()                 // "0.0.0.0:4003->5000/tcp"
-                    def afterColon = firstSegment.substring(firstSegment.lastIndexOf(':') + 1) // "4003->5000/tcp"
-                    def blue = afterColon.split('->')[0]                             // "4003"
+                    def firstSegment = portInfo.split(',')[0].trim()
+                    def afterColon = firstSegment.substring(firstSegment.lastIndexOf(':') + 1)
+                    def blue = afterColon.split('->')[0].trim()
 
-                    if (!blue?.isNumber()) {
-                        error "❌ Could not parse BLUE_PORT from: ${portInfo}"
+                    if (!blue.isInteger()) {
+                        error "❌ BLUE_PORT extraction failed. Extracted value: '${blue}' from '${portInfo}'"
                     }
 
                     env.BLUE_PORT = blue
