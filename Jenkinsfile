@@ -59,24 +59,24 @@ pipeline {
         stage('Detect Active Ports') {
             steps {
                 script {
-                
                     echo "▶ Detecting active BLUE port..."
-
+        
                     def blue = sh(
-                        script: """
-                            docker ps --filter 'name=^digital-banking-blue\$' --format '{{.Ports}}' |
-                            awk -F':' '{print \$2}' | awk -F'->' '{print \$1}'
-                        """,
+                        script: '''
+                            docker ps --filter "name=^digital-banking-blue$" --format "{{.Ports}}" \
+                            | awk -F":" "{print \$3}" \
+                            | awk -F"->" "{print \$1}"
+                        ''',
                         returnStdout: true
                     ).trim()
-
+        
                     if (!blue.isInteger()) {
                         error "❌ Port extraction failed. Extracted: '${blue}'"
                     }
-
-                    env.BLUE_PORT   = blue
+        
+                    env.BLUE_PORT = blue
                     env.CANARY_PORT = (blue == "4001") ? "4003" : "4001"
-
+        
                     echo "✔ BLUE_PORT  = ${env.BLUE_PORT}"
                     echo "✔ CANARY_PORT = ${env.CANARY_PORT}"
 
