@@ -59,24 +59,36 @@ pipeline {
         stage('Detect Active Ports') {
             steps {
                 script {
+                
+                    echo "▶ Checking running BLUE container..."
+
+                    // Get Ports output exactly as shown in Jenkins logs
                     def portInfo = sh(
-                        script: "docker ps --format '{{.Ports}}' --filter 'name=digital-banking-blue'",
+                        script: "docker ps --filter 'name=digital-banking-blue' --format '{{.Ports}}'",
                         returnStdout: true
                     ).trim()
-        
+
                     echo "DEBUG: docker ps Ports Output: ${portInfo}"
-        
-                    def match = portInfo =~ /0\.0\.0\.0:(\d+)->5000/
-                    if (!match) {
-                        error "❌ Could not detect BLUE port. digital-banking-blue container might not be running."
+
+                    if (!portInfo || portInfo == "") {
+                        error "❌ No port info found. digital-banking-blue container may not be running."
                     }
-        
-                    env.BLUE_PORT = match[0][1]  // captured port like 4001
+
+                    // --- Extract the HOST port in front of ->5000 ---
+                    // Matches: 0.0.0.0:4001->5000/tcp
+                    def matcher = (portInfo =~ /0\.0\.0\.0:(\d+)->5000/)
+
+                    if (!matcher || matcher.count == 0) {
+                        error "❌ Could not parse BLUE port from output: ${portInfo}"
+                    }
+
+                    env.BLUE_PORT = matcher[0][1]  // captured host port
                     env.CANARY_PORT = (env.BLUE_PORT == "4001") ? "4003" : "4001"
-        
-                    echo "BLUE_PORT = ${env.BLUE_PORT}"
-                    echo "CANARY_PORT = ${env.CANARY_PORT}"
-        
+
+                    echo "✔ BLUE_PORT = ${env.BLUE_PORT}"
+                    echo "✔ CANARY_PORT = ${env.CANARY_PORT}"
+
+                    // Make rollback folder
                     sh "mkdir -p $ROLLBACK_DIR"
                 }
             }
