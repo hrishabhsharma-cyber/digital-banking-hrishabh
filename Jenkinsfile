@@ -59,28 +59,22 @@ pipeline {
         stage('Detect Active Ports') {
             steps {
                 script {
-                    echo "▶ Checking running BLUE container..."
+                
+                    echo "▶ Detecting active BLUE port..."
 
-                    def portInfo = sh(
-                        script: "docker ps --filter 'name=^digital-banking-blue\$' --format '{{.Ports}}'",
+                    def blue = sh(
+                        script: """
+                            docker ps --filter 'name=^digital-banking-blue$' --format '{{.Ports}}' |
+                            awk -F':' '{print \$2}' | awk -F'->' '{print \$1}'
+                        """,
                         returnStdout: true
                     ).trim()
 
-                    echo "DEBUG: docker ps Ports Output: ${portInfo}"
-
-                    if (!portInfo) {
-                        error "❌ No port info — the digital-banking-blue container is not running."
-                    }
-
-                    def firstSegment = portInfo.split(',')[0].trim()
-                    def afterColon = firstSegment.substring(firstSegment.lastIndexOf(':') + 1)
-                    def blue = afterColon.split('->')[0].trim()
-
                     if (!blue.isInteger()) {
-                        error "❌ BLUE_PORT extraction failed. Extracted value: '${blue}' from '${portInfo}'"
+                        error "❌ Port extraction failed. Extracted: '${blue}'"
                     }
 
-                    env.BLUE_PORT = blue
+                    env.BLUE_PORT   = blue
                     env.CANARY_PORT = (blue == "4001") ? "4003" : "4001"
 
                     echo "✔ BLUE_PORT  = ${env.BLUE_PORT}"
