@@ -107,29 +107,23 @@ pipeline {
                 script {
                     echo "▶ Detecting active blue container port..."
         
-                    def portInfo = sh(
-                        script: "docker ps --filter 'name=digital-banking-blue' --format '{{.Ports}}'",
+                    // Use shell commands to extract port, avoiding Groovy regex entirely
+                    def blue = sh(
+                        script: """
+                            docker ps --filter 'name=digital-banking-blue' --format '{{.Ports}}' | \
+                            grep -oP '\\d+(?=->5000)' | head -1
+                        """,
                         returnStdout: true
                     ).trim()
         
-                    echo "DEBUG: Port info from docker ps: ${portInfo}"
+                    echo "DEBUG: Extracted BLUE_PORT: ${blue}"
         
-                    if (!portInfo) {
-                        error "❌ No port information found for digital-banking-blue"
-                    }
-        
-                    // Extract port number using regex (avoid storing Matcher object)
-                    def blue = null
-                    def matchResult = (portInfo =~ /(\d+)->5000/)
-                    
-                    if (matchResult.find()) {
-                        blue = matchResult.group(1)
-                    } else {
-                        error "❌ Could not extract port from: ${portInfo}"
+                    if (!blue) {
+                        error "❌ Could not extract BLUE_PORT from docker ps output"
                     }
                     
-                    // Validate port number
-                    if (!blue || !(blue ==~ /^\d+$/)) {
+                    // Simple validation without regex
+                    if (blue.length() < 4 || blue.length() > 5) {
                         error "❌ Invalid BLUE_PORT extracted: ${blue}"
                     }
         
