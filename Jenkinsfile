@@ -5,7 +5,6 @@ pipeline {
         IMAGE_NAME       = "hrishabhambak/digital-banking-hrishabh"
         ROLLBACK_DIR     = "/var/lib/jenkins/rollback"
         LAST_SUCCESS_FILE = "/var/lib/jenkins/rollback/LAST_SUCCESS"
-
         BLUE_PORT  = ""
         CANARY_PORT = ""
     }
@@ -73,20 +72,12 @@ pipeline {
                         error "❌ No port info — digital-banking-blue is not running."
                     }
 
-                    // Example portInfo:
-                    // "0.0.0.0:4003->5000/tcp, [::]:4003->5000/tcp"
+                    // SPLIT-based extraction (no matcher/regex objects)
+                    def firstSegment = portInfo.split(',')[0].trim()                 // "0.0.0.0:4003->5000/tcp"
+                    def afterColon = firstSegment.substring(firstSegment.lastIndexOf(':') + 1) // "4003->5000/tcp"
+                    def blue = afterColon.split('->')[0]                             // "4003"
 
-                    // STEP 1: Take first segment before comma
-                    def left = portInfo.split(",")[0].trim()
-
-                    // STEP 2: Extract port after the last colon
-                    def hostPart = left.substring(left.lastIndexOf(":") + 1)
-
-                    // STEP 3: Extract number before ->5000
-                    def blue = hostPart.split("->")[0]
-
-                    // Validation
-                    if (!blue.isNumber()) {
+                    if (!blue?.isNumber()) {
                         error "❌ Could not parse BLUE_PORT from: ${portInfo}"
                     }
 
@@ -108,8 +99,8 @@ pipeline {
                 docker rm digital-banking-canary 2>/dev/null || true
 
                 # Cleanup any old container on canary port
-                docker ps -q --filter "publish=$CANARY_PORT" | xargs -r docker stop || true
-                docker ps -aq --filter "publish=$CANARY_PORT" | xargs -r docker rm || true
+                docker ps -q --filter "publish=${env.CANARY_PORT}" | xargs -r docker stop || true
+                docker ps -aq --filter "publish=${env.CANARY_PORT}" | xargs -r docker rm || true
                 """
             }
         }
@@ -119,7 +110,7 @@ pipeline {
                 sh """
                 docker run -d \
                   --name digital-banking-canary \
-                  -p $CANARY_PORT:5000 \
+                  -p ${env.CANARY_PORT}:5000 \
                   -e PORT=5000 \
                   $IMAGE_NAME:${BUILD_NUMBER}
 
@@ -132,7 +123,7 @@ pipeline {
             steps {
                 script {
                     def code = sh(
-                        script: "curl -s -o /dev/null -w '%{http_code}' http://localhost:$CANARY_PORT/ || true",
+                        script: "curl -s -o /dev/null -w '%{http_code}' http://localhost:${env.CANARY_PORT}/ || true",
                         returnStdout: true
                     ).trim()
 
@@ -146,8 +137,8 @@ pipeline {
         stage('Traffic Split 90/10') {
             steps {
                 sh """
-                sudo sed -i "s/server 127.0.0.1:$BLUE_PORT weight=[0-9]*/server 127.0.0.1:$BLUE_PORT weight=90/" /etc/nginx/sites-available/nest-proxy.conf
-                sudo sed -i "s/server 127.0.0.1:$CANARY_PORT weight=[0-9]*/server 127.0.0.1:$CANARY_PORT weight=10/" /etc/nginx/sites-available/nest-proxy.conf
+                sudo sed -i "s/server 127.0.0.1:${env.BLUE_PORT} weight=[0-9]*/server 127.0.0.1:$BLUE_PORT weight=90/" /etc/nginx/sites-available/nest-proxy.conf
+                sudo sed -i "s/server 127.0.0.1:${env.CANARY_PORT} weight=[0-9]*/server 127.0.0.1:$CANARY_PORT weight=10/" /etc/nginx/sites-available/nest-proxy.conf
 
                 sudo systemctl reload nginx
                 sleep 10
@@ -159,7 +150,7 @@ pipeline {
             steps {
                 script {
                     def code = sh(
-                        script: "curl -s -o /dev/null -w '%{http_code}' http://localhost:$CANARY_PORT/ || true",
+                        script: "curl -s -o /dev/null -w '%{http_code}' http://localhost:${env.CANARY_PORT}/ || true",
                         returnStdout: true
                     ).trim()
 
@@ -173,8 +164,8 @@ pipeline {
         stage('Promote 100% Canary') {
             steps {
                 sh """
-                sudo sed -i "s/server 127.0.0.1:$BLUE_PORT weight=[0-9]*/server 127.0.0.1:$BLUE_PORT weight=1/" /etc/nginx/sites-available/nest-proxy.conf
-                sudo sed -i "s/server 127.0.0.1:$CANARY_PORT weight=[0-9]*/server 127.0.0.1:$CANARY_PORT weight=100/" /etc/nginx/sites-available/nest-proxy.conf
+                sudo sed -i "s/server 127.0.0.1:${env.BLUE_PORT} weight=[0-9]*/server 127.0.0.1:${env.BLUE_PORT} weight=1/" /etc/nginx/sites-available/nest-proxy.conf
+                sudo sed -i "s/server 127.0.0.1:${env.CANARY_PORT} weight=[0-9]*/server 127.0.0.1:${env.CANARY_PORT} weight=100/" /etc/nginx/sites-available/nest-proxy.conf
 
                 sudo systemctl reload nginx
                 """
