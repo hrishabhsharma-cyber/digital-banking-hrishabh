@@ -97,8 +97,8 @@ pipeline {
                     docker stop digital-banking-canary 2>/dev/null || true
                     docker rm   digital-banking-canary 2>/dev/null || true
 
-                    docker ps -q  --filter "publish=${CANARY_PORT}" | xargs -r docker stop || true
-                    docker ps -aq --filter "publish=${CANARY_PORT}" | xargs -r docker rm   || true
+                    docker ps -q  --filter "publish=$CANARY_PORT" | xargs -r docker stop || true
+                    docker ps -aq --filter "publish=$CANARY_PORT" | xargs -r docker rm   || true
                 """
             }
         }
@@ -108,7 +108,7 @@ pipeline {
                 sh """
                     docker run -d \
                         --name digital-banking-canary \
-                        -p ${CANARY_PORT}:5000 \
+                        -p $CANARY_PORT:5000 \
                         -e PORT=5000 \
                         $IMAGE_NAME:${BUILD_NUMBER}
 
@@ -121,7 +121,7 @@ pipeline {
             steps {
                 script {
                     def code = sh(
-                        script: "curl -s -o /dev/null -w '%{http_code}' http://localhost:${CANARY_PORT}/ || true",
+                        script: "curl -s -o /dev/null -w '%{http_code}' http://localhost:$CANARY_PORT/ || true",
                         returnStdout: true
                     ).trim()
 
@@ -135,8 +135,8 @@ pipeline {
         stage('Traffic Split 90/10') {
             steps {
                 sh """
-                    sudo sed -i "s/server 127.0.0.1:${BLUE_PORT} weight=[0-9]*/server 127.0.0.1:${BLUE_PORT} weight=90/" /etc/nginx/sites-available/nest-proxy.conf
-                    sudo sed -i "s/server 127.0.0.1:${CANARY_PORT} weight=[0-9]*/server 127.0.0.1:${CANARY_PORT} weight=10/" /etc/nginx/sites-available/nest-proxy.conf
+                    sudo sed -i "s/server 127.0.0.1:$BLUE_PORT weight=[0-9]*/server 127.0.0.1:$BLUE_PORT weight=90/" /etc/nginx/sites-available/nest-proxy.conf
+                    sudo sed -i "s/server 127.0.0.1:$CANARY_PORT weight=[0-9]*/server 127.0.0.1:$CANARY_PORT weight=10/" /etc/nginx/sites-available/nest-proxy.conf
                     sudo systemctl reload nginx
                     sleep 10
                 """
@@ -147,7 +147,7 @@ pipeline {
             steps {
                 script {
                     def code = sh(
-                        script: "curl -s -o /dev/null -w '%{http_code}' http://localhost:${CANARY_PORT}/ || true",
+                        script: "curl -s -o /dev/null -w '%{http_code}' http://localhost:$CANARY_PORT/ || true",
                         returnStdout: true
                     ).trim()
 
@@ -161,8 +161,8 @@ pipeline {
         stage('Promote 100% Canary') {
             steps {
                 sh """
-                    sudo sed -i "s/server 127.0.0.1:${BLUE_PORT} weight=[0-9]*/server 127.0.0.1:${BLUE_PORT} weight=1/"   /etc/nginx/sites-available/nest-proxy.conf
-                    sudo sed -i "s/server 127.0.0.1:${CANARY_PORT} weight=[0-9]*/server 127.0.0.1:${CANARY_PORT} weight=100/" /etc/nginx/sites-available/nest-proxy.conf
+                    sudo sed -i "s/server 127.0.0.1:$BLUE_PORT weight=[0-9]*/server 127.0.0.1:$BLUE_PORT weight=1/"   /etc/nginx/sites-available/nest-proxy.conf
+                    sudo sed -i "s/server 127.0.0.1:$CANARY_PORT weight=[0-9]*/server 127.0.0.1:$CANARY_PORT weight=100/" /etc/nginx/sites-available/nest-proxy.conf
                     sudo systemctl reload nginx
                 """
             }
