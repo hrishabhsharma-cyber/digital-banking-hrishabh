@@ -128,19 +128,20 @@ pipeline {
                     }
         
                     env.BLUE_PORT = blue
-                    env.CANARY_PORT = (blue == "4001") ? "4003" : "4001"
+                    def canaryPort = (blue == "4001") ? "4003" : "4001"
+                    env.CANARY_PORT = canaryPort
         
                     echo "✔ BLUE_PORT = ${env.BLUE_PORT}"
                     echo "✔ CANARY_PORT = ${env.CANARY_PORT}"
                     
-                    // Verify canary port is free
+                    // Verify canary port is free using local variable
                     def portInUse = sh(
-                        script: "docker ps --filter 'publish=${env.CANARY_PORT}' -q",
+                        script: "docker ps --filter 'publish=${canaryPort}' -q",
                         returnStdout: true
                     ).trim()
                     
                     if (portInUse) {
-                        echo "⚠ Canary port ${env.CANARY_PORT} is in use, will cleanup"
+                        echo "⚠ Canary port ${canaryPort} is in use, will cleanup"
                     }
                 }
             }
