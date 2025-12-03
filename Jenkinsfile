@@ -59,34 +59,32 @@ pipeline {
         stage('Detect Active Ports') {
             steps {
                 script {
-                
                     echo "▶ Checking running BLUE container..."
-
+        
                     def portInfo = sh(
                         script: "docker ps --filter 'name=digital-banking-blue' --format '{{.Ports}}'",
                         returnStdout: true
                     ).trim()
-
+        
                     echo "DEBUG: docker ps Ports Output: ${portInfo}"
-
+        
                     if (!portInfo) {
-                        error "❌ No port info found. digital-banking-blue container may not be running."
+                        error "❌ Failed: No port info for digital-banking-blue"
                     }
-
-                    // Inline regex extraction (no Matcher variable used)
-                    def blue = portInfo.replaceAll(/.*0\.0\.0\.0:(\d+)->5000.*/, "\$1")
-
-                    // If replacement failed → blue will equal the original string → invalid → error
-                    if (blue == portInfo) {
-                        error "❌ Failed to parse BLUE port from: ${portInfo}"
+        
+                    // FINAL working extractor (no matcher, no serialization issues)
+                    def blue = portInfo.replaceFirst(/^.*?:(\d+)->5000.*$/, "\$1")
+        
+                    if (blue == portInfo || !blue.isNumber()) {
+                        error "❌ Failed to extract BLUE_PORT from: ${portInfo}"
                     }
-
+        
                     env.BLUE_PORT = blue
                     env.CANARY_PORT = (blue == "4001") ? "4003" : "4001"
-
+        
                     echo "✔ BLUE_PORT = ${env.BLUE_PORT}"
                     echo "✔ CANARY_PORT = ${env.CANARY_PORT}"
-
+        
                     sh "mkdir -p $ROLLBACK_DIR"
                 }
             }
