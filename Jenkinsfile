@@ -6,8 +6,6 @@ pipeline {
         ROLLBACK_DIR      = "/var/lib/jenkins/rollback"
         LAST_SUCCESS_FILE = "/var/lib/jenkins/rollback/LAST_SUCCESS"
         NGINX_CONFIG      = "/etc/nginx/sites-available/nest-proxy.conf"
-        BLUE_PORT         = ""
-        CANARY_PORT       = ""
         PREVIOUS_BUILD    = ""
         ROLLBACK_NEEDED   = "false"
     }
@@ -128,6 +126,8 @@ pipeline {
                     }
         
                     env.BLUE_PORT = blue
+                    
+                    // Determine canary port
                     def canaryPort = (blue == "4001") ? "4003" : "4001"
                     env.CANARY_PORT = canaryPort
         
@@ -259,13 +259,13 @@ pipeline {
                     def sedResult = sh(
                         script: """
                             sudo sed -i.bak \
-                                -e 's|server 127\\.0\\.0\\.1:${env.BLUE_PORT} weight=[0-9]*|server 127.0.0.1:${env.BLUE_PORT} weight=90|' \
-                                -e 's|server 127\\.0\\.0\\.1:${env.CANARY_PORT} weight=[0-9]*|server 127.0.0.1:${env.CANARY_PORT} weight=10|' \
+                                -e 's|server 127\\.0\\.0\\.1:${bluePort} weight=[0-9]*|server 127.0.0.1:${bluePort} weight=90|' \
+                                -e 's|server 127\\.0\\.0\\.1:${canaryPort} weight=[0-9]*|server 127.0.0.1:${canaryPort} weight=10|' \
                                 $NGINX_CONFIG
                             
                             # If canary line doesn't exist, add it
-                            if ! grep -q "127.0.0.1:${env.CANARY_PORT}" $NGINX_CONFIG; then
-                                sudo sed -i '/upstream backend/a\\    server 127.0.0.1:${env.CANARY_PORT} weight=10;' $NGINX_CONFIG
+                            if ! grep -q "127.0.0.1:${canaryPort}" $NGINX_CONFIG; then
+                                sudo sed -i '/upstream backend/a\\    server 127.0.0.1:${canaryPort} weight=10;' $NGINX_CONFIG
                             fi
                         """,
                         returnStatus: true
@@ -308,6 +308,9 @@ pipeline {
         stage('Health Check #2 - During Split') {
             steps {
                 script {
+                    def props = readFile("${env.WORKSPACE}/ports.properties")
+                    def canaryPort = (props =~ /CANARY_PORT=(\d+)/)[0][1]
+                    
                     echo "▶ Monitoring canary health during traffic split..."
                     
                     def checks = 3
@@ -317,7 +320,7 @@ pipeline {
                         echo "Health check ${i}/${checks}..."
                         
                         def code = sh(
-                            script: "curl -s -o /dev/null -w '%{http_code}' http://localhost:$CANARY_PORT/",
+                            script: "curl -s -o /dev/null -w '%{http_code}' http://localhost:${canaryPort}/",
                             returnStdout: true
                         ).trim()
                         
@@ -339,12 +342,16 @@ pipeline {
         stage('Promote to 100% Canary') {
             steps {
                 script {
+                    def props = readFile("${env.WORKSPACE}/ports.properties")
+                    def bluePort = (props =~ /BLUE_PORT=(\d+)/)[0][1]
+                    def canaryPort = (props =~ /CANARY_PORT=(\d+)/)[0][1]
+                    
                     echo "▶ Promoting canary to 100% traffic..."
                     
                     sh """
                         sudo sed -i \
-                            -e 's|server 127\\.0\\.0\\.1:${env.BLUE_PORT} weight=[0-9]*|server 127.0.0.1:${env.BLUE_PORT} weight=1|' \
-                            -e 's|server 127\\.0\\.0\\.1:${env.CANARY_PORT} weight=[0-9]*|server 127.0.0.1:${env.CANARY_PORT} weight=100|' \
+                            -e 's|server 127\\.0\\.0\\.1:${bluePort} weight=[0-9]*|server 127.0.0.1:${bluePort} weight=1|' \
+                            -e 's|server 127\\.0\\.0\\.1:${canaryPort} weight=[0-9]*|server 127.0.0.1:${canaryPort} weight=100|' \
                             $NGINX_CONFIG
                         
                         sudo nginx -t
@@ -360,10 +367,13 @@ pipeline {
         stage('Final Health Check') {
             steps {
                 script {
+                    def props = readFile("${env.WORKSPACE}/ports.properties")
+                    def canaryPort = (props =~ /CANARY_PORT=(\d+)/)[0][1]
+                    
                     echo "▶ Running final health check at 100% traffic..."
                     
                     def code = sh(
-                        script: "curl -s -o /dev/null -w '%{http_code}' http://localhost:$CANARY_PORT/",
+                        script: "curl -s -o /dev/null -w '%{http_code}' http://localhost:${canaryPort}/",
                         returnStdout: true
                     ).trim()
                     
@@ -397,12 +407,15 @@ pipeline {
         stage('Save Success State') {
             steps {
                 script {
+                    def props = readFile("${env.WORKSPACE}/ports.properties")
+                    def bluePort = (props =~ /BLUE_PORT=(\d+)/)[0][1]
+                    
                     echo "▶ Saving successful deployment state..."
                     
                     sh """
                         echo "${BUILD_NUMBER}" > $LAST_SUCCESS_FILE
                         echo "Deployment Date: \$(date)" >> $LAST_SUCCESS_FILE
-                        echo "Blue Port: ${env.BLUE_PORT}" >> $LAST_SUCCESS_FILE
+                        echo "Blue Port: ${bluePort}" >> $LAST_SUCCESS_FILE
                     """
                     
                     // Keep only last 5 nginx backups
