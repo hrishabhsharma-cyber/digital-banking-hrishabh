@@ -86,39 +86,49 @@ pipeline {
         
                     env.BLUE_PORT = blue
                     env.CANARY_PORT = (blue == "4001") ? "4003" : "4001"
-        
-                    echo "✔ BLUE_PORT  = ${env.BLUE_PORT}"
-                    echo "✔ CANARY_PORT = ${env.CANARY_PORT}"
+                    echo "Now setting env: BLUE=${env.BLUE_PORT}, CANARY=${env.CANARY_PORT}"
 
                     sh "mkdir -p $ROLLBACK_DIR"
                 }
             }
         }
 
+        stage('Debug Env') {
+            steps {
+                script {
+                  echo "DEBUG (Groovy): BLUE=${env.BLUE_PORT}, CANARY=${env.CANARY_PORT}"
+                  // Check what shell sees
+                  sh "echo DEBUG (shell): BLUE=$BLUE_PORT CANARY=$CANARY_PORT"
+                }
+            }
+        }
+
+
         stage('Cleanup Previous Canary') {
             steps {
-                sh """
-                docker stop digital-banking-canary 2>/dev/null || true
-                docker rm digital-banking-canary 2>/dev/null || true
-
-                # Cleanup any old container on canary port
-                docker ps -q --filter "publish=${env.CANARY_PORT}" | xargs -r docker stop || true
-                docker ps -aq --filter "publish=${env.CANARY_PORT}" | xargs -r docker rm || true
-                """
+                script {
+                  def cmd = """
+                    docker stop digital-banking-canary 2>/dev/null || true
+                    docker rm digital-banking-canary 2>/dev/null || true
+                    docker ps -q --filter "publish=${env.CANARY_PORT}" | xargs -r docker stop || true
+                    docker ps -aq --filter "publish=${env.CANARY_PORT}" | xargs -r docker rm || true
+                  """
+                  echo "Running cleanup for canary port ${env.CANARY_PORT}"
+                  sh cmd
+                }
             }
         }
 
         stage('Start Canary') {
             steps {
-                sh """
-                docker run -d \
-                  --name digital-banking-canary \
-                  -p ${env.CANARY_PORT}:5000 \
-                  -e PORT=5000 \
-                  $IMAGE_NAME:${BUILD_NUMBER}
-
-                sleep 7
-                """
+                script {
+                  def runCmd = """
+                    docker run -d --name digital-banking-canary -p ${env.CANARY_PORT}:5000 -e PORT=5000 ${env.IMAGE_NAME}:${env.BUILD_NUMBER}
+                    sleep 7
+                  """
+                  echo "Starting canary on ${env.CANARY_PORT}"
+                  sh runCmd
+                }
             }
         }
 
