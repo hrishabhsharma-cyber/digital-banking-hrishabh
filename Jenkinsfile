@@ -60,28 +60,28 @@ pipeline {
             steps {
                 script {
                     def portInfo = sh(
-                        script: "docker ps --format \"{{.Ports}}\" --filter \"name=digital-banking-blue\"",
+                        script: "docker ps --format '{{.Ports}}' --filter 'name=digital-banking-blue'",
                         returnStdout: true
                     ).trim()
-
+        
                     echo "DEBUG: docker ps Ports Output: ${portInfo}"
-                    if (portInfo.contains("4001->5000/tcp")) {
-                        env.BLUE_PORT = "4001"
-                        env.CANARY_PORT = "4003"
-                    } else if (portInfo.contains("4003->5000/tcp")) {
-                        env.BLUE_PORT = "4003"
-                        env.CANARY_PORT = "4001"
-                    } else {
-                        error "❌ Could not detect BLUE port. 'digital-banking-blue' container may not be running."
+        
+                    def match = portInfo =~ /0\.0\.0\.0:(\d+)->5000/
+                    if (!match) {
+                        error "❌ Could not detect BLUE port. digital-banking-blue container might not be running."
                     }
-
+        
+                    env.BLUE_PORT = match[0][1]  // captured port like 4001
+                    env.CANARY_PORT = (env.BLUE_PORT == "4001") ? "4003" : "4001"
+        
                     echo "BLUE_PORT = ${env.BLUE_PORT}"
                     echo "CANARY_PORT = ${env.CANARY_PORT}"
-
+        
                     sh "mkdir -p $ROLLBACK_DIR"
                 }
             }
         }
+
 
         stage('Cleanup Previous Canary') {
             steps {
