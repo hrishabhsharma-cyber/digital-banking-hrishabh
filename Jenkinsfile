@@ -118,13 +118,15 @@ pipeline {
                         error "❌ No port information found for digital-banking-blue"
                     }
         
-                    // Extract port number using regex
-                    def matcher = (portInfo =~ /(\d+)->5000/)
-                    if (!matcher) {
+                    // Extract port number using regex (avoid storing Matcher object)
+                    def blue = null
+                    def matchResult = (portInfo =~ /(\d+)->5000/)
+                    
+                    if (matchResult.find()) {
+                        blue = matchResult.group(1)
+                    } else {
                         error "❌ Could not extract port from: ${portInfo}"
                     }
-                    
-                    def blue = matcher[0][1]
                     
                     // Validate port number
                     if (!blue || !(blue ==~ /^\d+$/)) {
