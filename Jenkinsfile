@@ -61,33 +61,32 @@ pipeline {
                 script {
                 
                     echo "▶ Checking running BLUE container..."
-        
-                    // Get port info
+
                     def portInfo = sh(
                         script: "docker ps --filter 'name=digital-banking-blue' --format '{{.Ports}}'",
                         returnStdout: true
                     ).trim()
-        
+
                     echo "DEBUG: docker ps Ports Output: ${portInfo}"
-        
-                    if (!portInfo || portInfo == "") {
+
+                    if (!portInfo) {
                         error "❌ No port info found. digital-banking-blue container may not be running."
                     }
-        
-                    // Regex matcher (sandbox-safe)
-                    def matcher = portInfo =~ /0\.0\.0\.0:(\d+)->5000/
-        
-                    if (!matcher.find()) {
-                        error "❌ Could not parse BLUE port from: ${portInfo}"
+
+                    // Inline regex extraction (no Matcher variable used)
+                    def blue = portInfo.replaceAll(/.*0\.0\.0\.0:(\d+)->5000.*/, "\$1")
+
+                    // If replacement failed → blue will equal the original string → invalid → error
+                    if (blue == portInfo) {
+                        error "❌ Failed to parse BLUE port from: ${portInfo}"
                     }
-        
-                    // Extract captured port
-                    env.BLUE_PORT = matcher.group(1)
-                    env.CANARY_PORT = (env.BLUE_PORT == "4001") ? "4003" : "4001"
-        
+
+                    env.BLUE_PORT = blue
+                    env.CANARY_PORT = (blue == "4001") ? "4003" : "4001"
+
                     echo "✔ BLUE_PORT = ${env.BLUE_PORT}"
                     echo "✔ CANARY_PORT = ${env.CANARY_PORT}"
-        
+
                     sh "mkdir -p $ROLLBACK_DIR"
                 }
             }
