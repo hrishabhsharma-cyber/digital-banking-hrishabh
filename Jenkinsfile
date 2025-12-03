@@ -73,14 +73,24 @@ pipeline {
                         error "❌ No port info — digital-banking-blue is not running."
                     }
 
-                    // SAFE extraction: no regex matcher, purely String replace
-                    def blue = portInfo.replaceFirst(/^.*?:(\\d+)->5000.*$/, "\$1")
+                    // Example portInfo:
+                    // "0.0.0.0:4003->5000/tcp, [::]:4003->5000/tcp"
 
-                    if (blue == portInfo || !blue.isNumber()) {
-                        error "❌ Failed to extract BLUE_PORT from: ${portInfo}"
+                    // STEP 1: Take first segment before comma
+                    def left = portInfo.split(",")[0].trim()
+
+                    // STEP 2: Extract port after the last colon
+                    def hostPart = left.substring(left.lastIndexOf(":") + 1)
+
+                    // STEP 3: Extract number before ->5000
+                    def blue = hostPart.split("->")[0]
+
+                    // Validation
+                    if (!blue.isNumber()) {
+                        error "❌ Could not parse BLUE_PORT from: ${portInfo}"
                     }
 
-                    env.BLUE_PORT   = blue
+                    env.BLUE_PORT = blue
                     env.CANARY_PORT = (blue == "4001") ? "4003" : "4001"
 
                     echo "✔ BLUE_PORT  = ${env.BLUE_PORT}"
