@@ -59,19 +59,35 @@ pipeline {
         stage('Detect Active Ports') {
             steps {
                 script {
-                    echo "▶ Detecting active BLUE port..."
+                    echo "▶ Detecting active BLUE port (JSON method)..."
         
-                    def blue = sh(
-                        script: '''
-                            docker ps --filter "name=^digital-banking-blue$" --format "{{.Ports}}" \
-                            | awk -F":" "{print \$3}" \
-                            | awk -F"->" "{print \$1}"
-                        ''',
+                    // Match any container whose name contains "digital-banking-blue"
+                    def containerId = sh(
+                        script: "docker ps --filter 'name=digital-banking-blue' --format '{{.ID}}'",
                         returnStdout: true
                     ).trim()
         
-                    if (!blue.isInteger()) {
-                        error "❌ Port extraction failed. Extracted: '${blue}'"
+                    if (!containerId) {
+                        error "❌ No running container found with name containing 'digital-banking-blue'"
+                    }
+        
+                    echo "Found BLUE container ID: ${containerId}"
+        
+                    // Extract HostPort from JSON
+                    def jsonPorts = sh(
+                        script: "docker inspect --format '{{json .NetworkSettings.Ports}}' ${containerId}",
+                        returnStdout: true
+                    ).trim()
+        
+                    echo "DEBUG JSON Ports: ${jsonPorts}"
+        
+                    def parser = new groovy.json.JsonSlurper()
+                    def ports = parser.parseText(jsonPorts)
+        
+                    def blue = ports["5000/tcp"][0]["HostPort"]
+        
+                    if (!blue?.isInteger()) {
+                        error "❌ Port extraction failed. HostPort = '${blue}'"
                     }
         
                     env.BLUE_PORT = blue
