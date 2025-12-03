@@ -1,166 +1,293 @@
 pipeline {
     agent any
-
+    
     environment {
-        IMAGE_NAME    = "hrishabhambak/digital-banking-hrishabh"
-        ROLLBACK_DIR  = "/var/lib/jenkins/rollback"
-        LAST_SUCCESS_FILE = "/var/lib/jenkins/rollback/LAST_SUCCESS"
-        BLUE_PORT     = ""        // MUST USE = and MUST be valid syntax
-        CANARY_PORT   = ""
+        IMAGE_NAME = "hrishabhambak/digital-banking-hrishabh"
+        IMAGE_TAG = "${BUILD_NUMBER}"
+        ROLLBACK_DIR = "/var/lib/jenkins/rollback"
+        LAST_SUCCESS_FILE = "${ROLLBACK_DIR}/LAST_SUCCESS"
+        DOCKERHUB_CREDENTIALS = credentials('dockerhub-credentials-id')
     }
-
+    
     stages {
-
-        stage('Checkout') {
-            steps {
-                checkout scm
-            }
-        }
-
         stage('Install Dependencies') {
             steps {
-                sh "npm install"
-            }
-        }
-
-        stage('Build App') {
-            steps {
-                sh """
-                npm run build > build.log 2>&1 || {
-                    echo "Build failed"
-                    cp build.log error.log
-                    exit 1
+                script {
+                    echo "Installing dependencies..."
+                    sh 'npm install'
                 }
-                """
             }
         }
-
-        stage('Docker Build') {
+        
+        stage('Build NestJS Project') {
             steps {
-                sh "docker build -t $IMAGE_NAME:${BUILD_NUMBER} ."
+                script {
+                    echo "Building NestJS project..."
+                    sh 'npm run build > build.log 2>&1'
+                }
+            }
+            post {
+                failure {
+                    script {
+                        echo "Node build FAILED."
+                        sh 'cp build.log error.log'
+                        error("Build failed")
+                    }
+                }
+                success {
+                    echo "Node build SUCCESS."
+                }
             }
         }
-
-        stage('Docker Push') {
+        
+        stage('Build Docker Image') {
             steps {
-                withCredentials([usernamePassword(
-                    credentialsId: 'dockerhub-credentials',
-                    usernameVariable: 'DOCKER_USER',
-                    passwordVariable: 'DOCKER_PASS'
-                )]) {
+                script {
+                    echo "Building Docker image: ${IMAGE_NAME}:${IMAGE_TAG}"
+                    sh "docker build -t ${IMAGE_NAME}:${IMAGE_TAG} ."
+                }
+            }
+        }
+        
+        stage('Docker Login') {
+            steps {
+                script {
+                    echo "Logging into Docker Hub..."
+                    sh '''
+                        echo $DOCKERHUB_CREDENTIALS_PSW | docker login -u $DOCKERHUB_CREDENTIALS_USR --password-stdin
+                    '''
+                }
+            }
+        }
+        
+        stage('Push Docker Image') {
+            steps {
+                script {
+                    echo "Pushing image to Docker Hub..."
+                    sh "docker push ${IMAGE_NAME}:${IMAGE_TAG}"
+                    echo "Docker image pushed successfully: ${IMAGE_NAME}:${IMAGE_TAG}"
+                }
+            }
+        }
+        
+        stage('Cleanup Build Artifacts') {
+            steps {
+                script {
+                    echo "Removing local Docker image..."
+                    sh "docker rmi ${IMAGE_NAME}:${IMAGE_TAG} || true"
+                    
+                    echo "Cleaning dist folder..."
+                    sh 'rm -rf dist'
+                }
+            }
+        }
+        
+        stage('Setup Canary Deployment') {
+            steps {
+                script {
+                    echo "🔥 Starting CANARY Deployment for Digital Banking App"
+                    echo "New version: ${IMAGE_TAG}"
+                    
+                    sh "mkdir -p ${ROLLBACK_DIR}"
+                }
+            }
+        }
+        
+        stage('Detect Current Blue Port') {
+            steps {
+                script {
+                    echo "Detecting current BLUE port..."
+                    
+                    def bluePort = sh(
+                        script: '''
+                            if docker ps --format '{{.Ports}}' --filter "name=digital-banking-blue" | grep -q "4001->"; then
+                                echo "4001"
+                            else
+                                echo "4003"
+                            fi
+                        ''',
+                        returnStdout: true
+                    ).trim()
+                    
+                    def canaryPort = (bluePort == "4001") ? "4003" : "4001"
+                    
+                    env.BLUE_PORT = bluePort
+                    env.CANARY_PORT = canaryPort
+                    
+                    echo "🔵 BLUE is running on port: ${env.BLUE_PORT}"
+                    echo "🟡 CANARY will run on port: ${env.CANARY_PORT}"
+                }
+            }
+        }
+        
+        stage('Start Canary Container') {
+            steps {
+                script {
+                    echo "Cleaning any previous CANARY container..."
+                    sh '''
+                        docker stop digital-banking-canary 2>/dev/null || true
+                        docker rm digital-banking-canary 2>/dev/null || true
+                    '''
+                    
+                    echo "Force cleaning CANARY port: ${env.CANARY_PORT}..."
+                    sh '''
+                        docker ps -q --filter "publish=${CANARY_PORT}" | xargs -r docker stop || true
+                        docker ps -aq --filter "publish=${CANARY_PORT}" | xargs -r docker rm || true
+                    '''
+                    
+                    echo "Starting CANARY container on port ${env.CANARY_PORT}..."
                     sh """
-                    echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
-                    docker push $IMAGE_NAME:${BUILD_NUMBER}
+                        docker run -d \
+                            --name digital-banking-canary \
+                            -p ${env.CANARY_PORT}:5000 \
+                            -e PORT=5000 \
+                            ${IMAGE_NAME}:${IMAGE_TAG}
                     """
+                    
+                    sleep 7
                 }
             }
         }
-
-        stage('Detect + Deploy Canary (atomic)') {
-          steps {
-            script {
-              echo "▶ Detecting active BLUE port (atomic deploy)"
-
-              // Extract blue port using bash (safe)
-              def blue = sh(script: '''
-                CID=$(docker ps --filter "name=digital-banking-blue" --format "{{.ID}}" | head -n 1)
-                if [ -z "$CID" ]; then
-                  echo "NO_CONTAINER"
-                  exit 0
-                fi
-
-                docker inspect "$CID" --format '{{json .NetworkSettings.Ports}}' \
-                  | grep -o '"HostPort":"[0-9]*"' \
-                  | head -n 1 \
-                  | sed 's/"HostPort":"//; s/"//'
-              ''', returnStdout: true).trim()
-
-              echo "BLUE extracted raw: '${blue}'"
-
-              if (blue == "" || blue == "NO_CONTAINER" || !blue.isInteger()) {
-                error "❌ Failed to detect BLUE_PORT. Extracted: '${blue}'"
-              }
-
-              def canary = (blue == "4001") ? "4003" : "4001"
-              echo "Deploy plan: BLUE=${blue}, CANARY=${canary}"
-
-              // Build deployment script with escaped $ for shell
-              def deployCmd = """
-                set -euo pipefail
-
-                echo "1) Cleaning previous canary on port ${canary}..."
-                docker stop digital-banking-canary 2>/dev/null || true
-                docker rm  digital-banking-canary 2>/dev/null || true
-                docker ps -q --filter "publish=${canary}" | xargs -r docker stop || true
-                docker ps -aq --filter "publish=${canary}" | xargs -r docker rm || true
-
-                echo "2) Starting canary (image: ${IMAGE_NAME}:${BUILD_NUMBER}) on ${canary}..."
-                docker run -d --name digital-banking-canary -p ${canary}:5000 -e PORT=5000 ${IMAGE_NAME}:${BUILD_NUMBER}
-                sleep 7
-
-                echo "3) Health check (canary) at http://localhost:${canary}/"
-                code=\$(curl -s -o /dev/null -w '%{http_code}' http://localhost:${canary}/ || true)
-                if [ "\$code" != "200" ]; then
-                  echo "Canary initial health check failed with HTTP \$code"
-                  exit 2
-                fi
-
-                echo "4) Traffic split 90/10..."
-                sudo sed -i "s/server 127.0.0.1:${blue} weight=[0-9]*/server 127.0.0.1:${blue} weight=90/" /etc/nginx/sites-available/nest-proxy.conf
-                sudo sed -i "s/server 127.0.0.1:${canary} weight=[0-9]*/server 127.0.0.1:${canary} weight=10/" /etc/nginx/sites-available/nest-proxy.conf
-                sudo systemctl reload nginx
-                sleep 10
-
-                echo "5) Health check during 90/10 split..."
-                code=\$(curl -s -o /dev/null -w '%{http_code}' http://localhost:${canary}/ || true)
-                if [ "\$code" != "200" ]; then
-                  echo "Canary degraded with HTTP \$code"
-                  # Rollback traffic
-                  sudo sed -i "s/server 127.0.0.1:${blue} weight=[0-9]*/server 127.0.0.1:${blue} weight=100/" /etc/nginx/sites-available/nest-proxy.conf
-                  sudo sed -i "s/server 127.0.0.1:${canary} weight=[0-9]*/server 127.0.0.1:${canary} weight=0/" /etc/nginx/sites-available/nest-proxy.conf
-                  sudo systemctl reload nginx || true
-                  docker stop digital-banking-canary || true
-                  docker rm  digital-banking-canary || true
-                  exit 3
-                fi
-
-                echo "6) Promote canary to 100%..."
-                sudo sed -i "s/server 127.0.0.1:${blue} weight=[0-9]*/server 127.0.0.1:${blue} weight=1/" /etc/nginx/sites-available/nest-proxy.conf
-                sudo sed -i "s/server 127.0.0.1:${canary} weight=[0-9]*/server 127.0.0.1:${canary} weight=100/" /etc/nginx/sites-available/nest-proxy.conf
-                sudo systemctl reload nginx
-
-                echo "7) Rename canary to blue (zero downtime)..."
-                docker stop digital-banking-blue 2>/dev/null || true
-                docker rm   digital-banking-blue 2>/dev/null || true
-
-                docker rename digital-banking-canary digital-banking-blue
-
-                docker ps -aq --filter "name=digital-banking-blue" | tail -n +2 | xargs -r docker rm -f || true
-
-                echo "8) Saving LAST_SUCCESS=${BUILD_NUMBER}"
-                mkdir -p ${ROLLBACK_DIR}
-                echo "${BUILD_NUMBER}" > ${LAST_SUCCESS_FILE}
-              """
-
-              sh deployCmd
-
-              echo "Atomic deploy complete."
+        
+        stage('Health Check Canary - Initial') {
+            steps {
+                script {
+                    echo "🏥 Running initial health check on CANARY..."
+                    
+                    def healthStatus = sh(
+                        script: "curl -s -o /dev/null -w '%{http_code}' http://localhost:${env.CANARY_PORT}/ || echo '000'",
+                        returnStdout: true
+                    ).trim()
+                    
+                    echo "CANARY Health Status: ${healthStatus}"
+                    
+                    if (healthStatus != "200") {
+                        error("❌ CANARY FAILED initial health check!")
+                    }
+                    
+                    echo "✅ CANARY is HEALTHY."
+                }
             }
-          }
+            post {
+                failure {
+                    script {
+                        echo "❌ CANARY FAILED! Starting rollback..."
+                        sh '''
+                            docker stop digital-banking-canary || true
+                            docker rm digital-banking-canary || true
+                        '''
+                    }
+                }
+            }
         }
-
+        
+        stage('Apply 90/10 Traffic Split') {
+            steps {
+                script {
+                    echo "⚡ Applying 90/10 Nginx weight distribution (BLUE/CANARY)..."
+                    
+                    sh """
+                        sudo sed -i "s/server 127.0.0.1:${env.BLUE_PORT} weight=[0-9]*/server 127.0.0.1:${env.BLUE_PORT} weight=90/" /etc/nginx/sites-available/nest-proxy.conf
+                        sudo sed -i "s/server 127.0.0.1:${env.CANARY_PORT} weight=[0-9]*/server 127.0.0.1:${env.CANARY_PORT} weight=10/" /etc/nginx/sites-available/nest-proxy.conf
+                        sudo systemctl reload nginx
+                    """
+                    
+                    echo "🟡 10% traffic → CANARY | 🔵 90% traffic → BLUE"
+                    sleep 10
+                }
+            }
+        }
+        
+        stage('Health Check Canary - Post Traffic') {
+            steps {
+                script {
+                    echo "🏥 Second health check after traffic routing..."
+                    
+                    def healthStatus = sh(
+                        script: "curl -s -o /dev/null -w '%{http_code}' http://localhost:${env.CANARY_PORT}/ || echo '000'",
+                        returnStdout: true
+                    ).trim()
+                    
+                    echo "CANARY Health Status: ${healthStatus}"
+                    
+                    if (healthStatus != "200") {
+                        error("❌ CANARY degraded during test!")
+                    }
+                    
+                    echo "🚀 CANARY is stable. Promoting to FULL PRODUCTION..."
+                }
+            }
+            post {
+                failure {
+                    script {
+                        echo "❌ CANARY degraded! Rolling back..."
+                        sh '''
+                            docker stop digital-banking-canary || true
+                            docker rm digital-banking-canary || true
+                        '''
+                        
+                        sh """
+                            sudo sed -i "s/server 127.0.0.1:${env.BLUE_PORT} weight=[0-9]*/server 127.0.0.1:${env.BLUE_PORT} weight=100/" /etc/nginx/sites-available/nest-proxy.conf
+                            sudo sed -i "s/server 127.0.0.1:${env.CANARY_PORT} weight=[0-9]*/server 127.0.0.1:${env.CANARY_PORT} weight=1/" /etc/nginx/sites-available/nest-proxy.conf
+                            sudo systemctl reload nginx
+                        """
+                    }
+                }
+            }
+        }
+        
+        stage('Promote Canary to Full Production') {
+            steps {
+                script {
+                    echo "➡ Promoting CANARY to full production (100% traffic)..."
+                    
+                    sh """
+                        sudo sed -i 's/server 127\\.0\\.0\\.1:${env.BLUE_PORT} weight=[0-9]\\+;/server 127.0.0.1:${env.BLUE_PORT} weight=1;/' /etc/nginx/sites-available/nest-proxy.conf
+                        sudo sed -i 's/server 127\\.0\\.0\\.1:${env.CANARY_PORT} weight=[0-9]\\+;/server 127.0.0.1:${env.CANARY_PORT} weight=100;/' /etc/nginx/sites-available/nest-proxy.conf
+                        sudo nginx -t
+                        sudo systemctl reload nginx
+                    """
+                    
+                    echo "➡ 100% traffic now routed to CANARY container (port ${env.CANARY_PORT})"
+                }
+            }
+        }
+        
+        stage('Switch Canary to Blue') {
+            steps {
+                script {
+                    echo "🟦 Removing old BLUE container..."
+                    sh '''
+                        docker stop digital-banking-blue || true
+                        docker rm digital-banking-blue || true
+                    '''
+                    
+                    echo "🟩 Promoting CANARY → BLUE..."
+                    sh 'docker rename digital-banking-canary digital-banking-blue'
+                }
+            }
+        }
+        
+        stage('Save Stable Version') {
+            steps {
+                script {
+                    echo "Saving stable version..."
+                    sh "echo '${IMAGE_TAG}' > ${LAST_SUCCESS_FILE}"
+                    echo "🎉 Canary Deployment SUCCESS! Version ${IMAGE_TAG} promoted to BLUE on port ${env.CANARY_PORT}."
+                }
+            }
+        }
     }
-
+    
     post {
-        failure {
-            sh """
-            echo "❌ Pipeline failed — rolling back canary."
-            docker stop digital-banking-canary || true
-            docker rm digital-banking-canary || true
-            """
-        }
         success {
-            echo "🎉 CI/CD Canary Deployment SUCCESS — Version ${BUILD_NUMBER} is LIVE."
+            echo "✅ Pipeline completed successfully!"
+        }
+        failure {
+            echo "❌ Pipeline failed. Check logs for details."
+        }
+        always {
+            echo "Pipeline execution finished."
         }
     }
 }
