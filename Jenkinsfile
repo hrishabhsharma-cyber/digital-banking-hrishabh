@@ -5,8 +5,8 @@ pipeline {
         IMAGE_NAME        = "hrishabhambak/digital-banking-hrishabh"
         ROLLBACK_DIR      = "/var/lib/jenkins/rollback"
         LAST_SUCCESS_FILE = "/var/lib/jenkins/rollback/LAST_SUCCESS"
-        BLUE_PORT   = ""
-        CANARY_PORT = ""
+        BLUE_PORT         = "4001"
+        CANARY_PORT       = "4003"
     }
 
     stages {
