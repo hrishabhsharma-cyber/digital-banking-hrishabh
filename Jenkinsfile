@@ -59,40 +59,32 @@ pipeline {
         stage('Detect Active Ports') {
             steps {
                 script {
-                    echo "▶ Detecting active BLUE port (JSON method)..."
-        
-                    // Match any container whose name contains "digital-banking-blue"
-                    def containerId = sh(
-                        script: "docker ps --filter 'name=digital-banking-blue' --format '{{.ID}}'",
+                    echo "▶ Detecting active BLUE port..."
+
+                    def blue = sh(
+                        script: """
+                            CID=\$(docker ps --filter "name=digital-banking-blue" --format "{{.ID}}" | head -n 1)
+
+                            if [ -z "\$CID" ]; then
+                                echo "NO_CONTAINER"
+                                exit 0
+                            fi
+
+                            docker inspect \$CID --format '{{json .NetworkSettings.Ports}}' \
+                            | grep -o '"HostPort":"[0-9]*"' \
+                            | head -n 1 \
+                            | sed 's/"HostPort":"//; s/"//'
+                        """,
                         returnStdout: true
                     ).trim()
-        
-                    if (!containerId) {
-                        error "❌ No running container found with name containing 'digital-banking-blue'"
+
+                    if (blue == "" || blue == "NO_CONTAINER" || !blue.isInteger()) {
+                        error "❌ Failed to detect BLUE_PORT. Extracted: '${blue}'"
                     }
-        
-                    echo "Found BLUE container ID: ${containerId}"
-        
-                    // Extract HostPort from JSON
-                    def jsonPorts = sh(
-                        script: "docker inspect --format '{{json .NetworkSettings.Ports}}' ${containerId}",
-                        returnStdout: true
-                    ).trim()
-        
-                    echo "DEBUG JSON Ports: ${jsonPorts}"
-        
-                    def parser = new groovy.json.JsonSlurper()
-                    def ports = parser.parseText(jsonPorts)
-        
-                    def blue = ports["5000/tcp"][0]["HostPort"]
-        
-                    if (!blue?.isInteger()) {
-                        error "❌ Port extraction failed. HostPort = '${blue}'"
-                    }
-        
+
                     env.BLUE_PORT = blue
                     env.CANARY_PORT = (blue == "4001") ? "4003" : "4001"
-        
+
                     echo "✔ BLUE_PORT  = ${env.BLUE_PORT}"
                     echo "✔ CANARY_PORT = ${env.CANARY_PORT}"
 
