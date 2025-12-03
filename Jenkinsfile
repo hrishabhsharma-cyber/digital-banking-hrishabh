@@ -6,7 +6,7 @@ pipeline {
         IMAGE_TAG = "${BUILD_NUMBER}"
         ROLLBACK_DIR = "/var/lib/jenkins/rollback"
         LAST_SUCCESS_FILE = "${ROLLBACK_DIR}/LAST_SUCCESS"
-        DOCKERHUB_CREDENTIALS = credentials('dockerhub-credentials-id')
+        DOCKERHUB_CREDENTIALS = credentials('dockerhub-credentials')
     }
     
     stages {
