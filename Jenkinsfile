@@ -65,10 +65,10 @@ pipeline {
                     ).trim()
 
                     echo "DEBUG: docker ps Ports Output: ${portInfo}"
-                    if (portInfo.contains("4001->5000")) {
+                    if (portInfo.contains("4001->5000/tcp")) {
                         env.BLUE_PORT = "4001"
                         env.CANARY_PORT = "4003"
-                    } else if (portInfo.contains("4003->5000")) {
+                    } else if (portInfo.contains("4003->5000/tcp")) {
                         env.BLUE_PORT = "4003"
                         env.CANARY_PORT = "4001"
                     } else {
