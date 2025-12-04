@@ -16,7 +16,7 @@ pipeline {
                 stage('Lint') {
                     steps {
                         cache(maxCacheSize: 1, caches: [
-                            [$class: 'BuildDiskCache', path: './node_modules', key: 'node-modules-cache']
+                            arbitraryFileCache(path: 'node_modules', cacheValidityDecidingFile: 'package-lock.json')
                         ]) {
                             sh "npm ci && npm run lint"
                         }
@@ -25,7 +25,7 @@ pipeline {
                 stage('Unit Tests') {
                     steps {
                         cache(maxCacheSize: 1, caches: [
-                            [$class: 'BuildDiskCache', path: './node_modules', key: 'node-modules-cache']
+                            arbitraryFileCache(path: 'node_modules', cacheValidityDecidingFile: 'package-lock.json')
                         ]) {
                             sh "npm ci && npm run test -- --coverage"
                         }
@@ -34,7 +34,7 @@ pipeline {
                 stage('Security Scan') {
                     steps {
                         cache(maxCacheSize: 1, caches: [
-                            [$class: 'BuildDiskCache', path: './node_modules', key: 'node-modules-cache']
+                            arbitraryFileCache(path: 'node_modules', cacheValidityDecidingFile: 'package-lock.json')
                         ]) {
                            sh "npm audit --audit-level=high"
                         }
