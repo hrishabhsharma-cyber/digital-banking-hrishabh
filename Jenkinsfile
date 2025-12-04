@@ -24,6 +24,27 @@ pipeline {
             }
         }
 
+        stage('CI Checks') {
+            parallel {
+                stage('Lint') {
+                    steps {
+                        sh "npm ci && npm run lint"
+                    }
+                }
+                stage('Unit Tests') {
+                    steps {
+                        sh "npm ci && npm run test -- --coverage"
+                    }
+                }
+                stage('Security Scan') {
+                    steps {
+                        sh "npm audit --audit-level=high"
+                    }
+                }
+            }
+        }
+
+
         stage('Docker Build & Push') {
             steps {
                 echo "Building & pushing image ${IMAGE_NAME}:${IMAGE_TAG}"
