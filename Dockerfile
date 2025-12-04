@@ -1,20 +1,43 @@
-# Step 1: Use Node image
-FROM node:22
+###############################
+# 1. Builder Stage
+###############################
+FROM node:22-alpine AS builder
 
-# Step 2: Create app directory
 WORKDIR /app
 
-# Step 3: Copy package files
+# Copy only package files to install deps
 COPY package*.json ./
 
-# Step 4: Install dependencies
-RUN npm install
+# Install ALL dependencies (including dev)
+RUN npm ci
 
-# Step 5: Copy project files
+# Copy the rest of the source code
 COPY . .
 
-# Step 6: Build the NestJS app
+# Build NestJS
 RUN npm run build
 
-# Step 7: Start the app
+
+###############################
+# 2. Production Stage
+###############################
+FROM node:22-alpine AS runner
+
+WORKDIR /app
+
+# Copy package files again for prod deps
+COPY package*.json ./
+
+# Install ONLY production dependencies
+RUN npm ci --only=production
+
+# Copy build output from builder
+COPY --from=builder /app/dist ./dist
+
+# Optional: add non-root user for security
+RUN adduser -D nestuser
+USER nestuser
+
+EXPOSE 5000
+
 CMD ["node", "dist/main.js"]
