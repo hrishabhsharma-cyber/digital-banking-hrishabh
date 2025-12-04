@@ -55,11 +55,15 @@ pipeline {
         stage('SonarQube Analysis') {
             steps {
                 withSonarQubeEnv('sonarqube') {
-                    sh """
-                        npm ci
-                        npm run test -- --coverage
-                        sonar-scanner
-                    """
+                    script {
+                        def scannerHome = tool 'SonarScanner'
+
+                        sh """
+                            npm ci
+                            npm run test -- --coverage
+                            ${scannerHome}/bin/sonar-scanner
+                        """
+                    }
                 }
             }
         }
