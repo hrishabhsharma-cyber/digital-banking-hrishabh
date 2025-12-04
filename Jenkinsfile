@@ -11,36 +11,49 @@ pipeline {
 
     stages {
 
+        stage('CI Checks') {
+            parallel {
+                stage('Lint') {
+                    steps {
+                        cache(maxCacheSize: 1, caches: [
+                            [$class: 'BuildDiskCache', path: './node_modules', key: 'node-modules-cache']
+                        ]) {
+                            sh "npm ci && npm run lint"
+                        }
+                    }
+                }
+                stage('Unit Tests') {
+                    steps {
+                        cache(maxCacheSize: 1, caches: [
+                            [$class: 'BuildDiskCache', path: './node_modules', key: 'node-modules-cache']
+                        ]) {
+                            sh "npm ci && npm run test -- --coverage"
+                        }
+                    }
+                }
+                stage('Security Scan') {
+                    steps {
+                        cache(maxCacheSize: 1, caches: [
+                            [$class: 'BuildDiskCache', path: './node_modules', key: 'node-modules-cache']
+                        ]) {
+                           sh "npm audit --audit-level=high"
+                        }
+                    }
+                }
+            }
+        }
+
         stage('Build App') {
             steps {
                 echo "Installing deps & building NestJS..."
                 sh """
-                    npm install
+                    npm ci
                     npm run build > build.log 2>&1 || {
                         cp build.log error.log
                         exit 1
                     }
                 """
-            }
-        }
-
-        stage('CI Checks') {
-            parallel {
-                stage('Lint') {
-                    steps {
-                        sh "npm ci && npm run lint"
-                    }
-                }
-                stage('Unit Tests') {
-                    steps {
-                        sh "npm ci && npm run test -- --coverage"
-                    }
-                }
-                stage('Security Scan') {
-                    steps {
-                        sh "npm audit --audit-level=high"
-                    }
-                }
+                archiveArtifacts artifacts: 'dist/**', fingerprint: true
             }
         }
 
@@ -49,10 +62,23 @@ pipeline {
             steps {
                 echo "Building & pushing image ${IMAGE_NAME}:${IMAGE_TAG}"
                 sh """
-                    docker build -t ${IMAGE_NAME}:${IMAGE_TAG} .
+                    # Pull latest for caching
+                    docker pull ${IMAGE_NAME}:latest || true
+
+                    docker build \
+                        --cache-from=${IMAGE_NAME}:latest \
+                        -t ${IMAGE_NAME}:${IMAGE_TAG} .
+
                     echo ${DOCKERHUB_PSW} | docker login -u ${DOCKERHUB_USR} --password-stdin
                     docker push ${IMAGE_NAME}:${IMAGE_TAG}
+
+                    # Update latest tag for future cache builds
+                    docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${IMAGE_NAME}:latest
+                    docker push ${IMAGE_NAME}:latest
+
                     docker rmi ${IMAGE_NAME}:${IMAGE_TAG} || true
+                    docker rmi ${IMAGE_NAME}:latest || true
+
                     rm -rf dist || true
                 """
             }
@@ -174,7 +200,6 @@ pipeline {
             script {
                 echo "❌ FAILURE DETECTED — Initiating rollback..."
         
-                // 1. Read last successful version
                 def lastTag = sh(script: "cat ${LAST_SUCCESS_FILE} || echo 'none'", returnStdout: true).trim()
                 if (lastTag == "none" || lastTag == "") {
                     echo "⚠️ No LAST_SUCCESS version found. Cannot rollback."
@@ -183,13 +208,11 @@ pipeline {
         
                 echo "🔄 Rolling back to version: ${lastTag}"
         
-                // 2. Pull previous stable image
                 sh """
                     echo "📥 Pulling stable image..."
                     docker pull ${IMAGE_NAME}:${lastTag}
                 """
         
-                // 3. Stop & remove current (failed) containers
                 sh """
                     echo "🛑 Stopping failed containers..."
                     docker stop digital-banking-blue || true
@@ -199,7 +222,6 @@ pipeline {
                     docker rm digital-banking-canary || true
                 """
         
-                // 4. Recreate BLUE using old stable version
                 sh """
                     echo "🚀 Starting rollback BLUE container..."
                     docker run -d --name digital-banking-blue \\
@@ -207,7 +229,6 @@ pipeline {
                         ${IMAGE_NAME}:${lastTag}
                 """
         
-                // 5. Reset Nginx routing (100% BLUE, disable CANARY)
                 sh """
                     echo "🔧 Resetting Nginx to 100% BLUE..."
                     sudo sed -i "s/server 127.0.0.1:4001.*/server 127.0.0.1:4001 weight=100;/" /etc/nginx/sites-available/nest-proxy.conf
@@ -216,7 +237,6 @@ pipeline {
                     sudo systemctl reload nginx
                 """
         
-                // 6. Final health check
                 def health = sh(script: "curl -s -o /dev/null -w '%{http_code}' http://localhost:4001/ || echo 000", returnStdout: true).trim()
         
                 if (health != "200") {
