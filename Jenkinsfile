@@ -37,24 +37,6 @@ pipeline {
                         """
                     }
                 }
-                stage('SonarQube Analysis') {
-                    steps {
-                        withSonarQubeEnv('sonarqube') {
-                            sh """
-                                npm ci
-                                npm run test -- --coverage
-                                sonar-scanner
-                            """
-                        }
-                    }
-                }
-                stage('Quality Gate') {
-                    steps {
-                        timeout(time: 5, unit: 'MINUTES') {
-                            waitForQualityGate abortPipeline: true
-                        }
-                    }
-                }
                 stage('Security Scan') {
                     steps {
                         sh """
@@ -66,6 +48,25 @@ pipeline {
                             npm audit --audit-level=high
                         """
                     }
+                }
+            }
+        }
+
+        stage('SonarQube Analysis') {
+            steps {
+                withSonarQubeEnv('sonarqube') {
+                    sh """
+                        npm ci
+                        npm run test -- --coverage
+                        sonar-scanner
+                    """
+                }
+            }
+        }
+        stage('Quality Gate') {
+            steps {
+                timeout(time: 5, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true
                 }
             }
         }
