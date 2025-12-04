@@ -70,6 +70,7 @@ pipeline {
                     docker run -d \
                         --name digital-banking-canary \
                         -p ${env.CANARY_PORT}:5000 \
+                        -e PORT=5000 \
                         ${IMAGE_NAME}:${IMAGE_TAG}
 
                     sleep 7
