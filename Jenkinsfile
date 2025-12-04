@@ -149,7 +149,63 @@ pipeline {
 
     post {
         success { echo "🎉 SUCCESS: Released version ${IMAGE_TAG}" }
-        failure { echo "❌ FAILURE: Rolling back to previous version..." }
+        failure {
+            script {
+                echo "❌ FAILURE DETECTED — Initiating rollback..."
+        
+                // 1. Read last successful version
+                def lastTag = sh(script: "cat ${LAST_SUCCESS_FILE} || echo 'none'", returnStdout: true).trim()
+                if (lastTag == "none" || lastTag == "") {
+                    echo "⚠️ No LAST_SUCCESS version found. Cannot rollback."
+                    return
+                }
+        
+                echo "🔄 Rolling back to version: ${lastTag}"
+        
+                // 2. Pull previous stable image
+                sh """
+                    echo "📥 Pulling stable image..."
+                    docker pull ${IMAGE_NAME}:${lastTag}
+                """
+        
+                // 3. Stop & remove current (failed) containers
+                sh """
+                    echo "🛑 Stopping failed containers..."
+                    docker stop digital-banking-blue || true
+                    docker rm digital-banking-blue || true
+        
+                    docker stop digital-banking-canary || true
+                    docker rm digital-banking-canary || true
+                """
+        
+                // 4. Recreate BLUE using old stable version
+                sh """
+                    echo "🚀 Starting rollback BLUE container..."
+                    docker run -d --name digital-banking-blue \\
+                        -p 4001:5000 -e PORT=5000 \\
+                        ${IMAGE_NAME}:${lastTag}
+                """
+        
+                // 5. Reset Nginx routing (100% BLUE, disable CANARY)
+                sh """
+                    echo "🔧 Resetting Nginx to 100% BLUE..."
+                    sudo sed -i "s/server 127.0.0.1:4001.*/server 127.0.0.1:4001 weight=100;/" /etc/nginx/sites-available/nest-proxy.conf
+                    sudo sed -i "s/server 127.0.0.1:4003.*/server 127.0.0.1:4003 weight=1;/" /etc/nginx/sites-available/nest-proxy.conf
+                    sudo nginx -t
+                    sudo systemctl reload nginx
+                """
+        
+                // 6. Final health check
+                def health = sh(script: "curl -s -o /dev/null -w '%{http_code}' http://localhost:4001/ || echo 000", returnStdout: true).trim()
+        
+                if (health != "200") {
+                    echo "🔥 ROLLBACK FAILED! BLUE is unhealthy even after rollback. Manual intervention required!"
+                } else {
+                    echo "✅ ROLLBACK SUCCESS — system restored to stable version ${lastTag}"
+                }
+            }
+        }
+
         always  { echo "Pipeline finished." }
     }
 }
