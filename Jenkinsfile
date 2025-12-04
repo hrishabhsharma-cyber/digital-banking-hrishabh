@@ -55,7 +55,6 @@ pipeline {
                         }
                     }
                 }
-
                 stage('Security Scan') {
                     steps {
                         sh """
@@ -70,7 +69,6 @@ pipeline {
                 }
             }
         }
-
 
         stage('Build App') {
             steps {
