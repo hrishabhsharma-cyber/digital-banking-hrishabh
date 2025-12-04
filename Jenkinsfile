@@ -15,29 +15,38 @@ pipeline {
             parallel {
                 stage('Lint') {
                     steps {
-                        cache(maxCacheSize: 1, caches: [
-                            arbitraryFileCache(path: 'node_modules', cacheValidityDecidingFile: 'package-lock.json')
-                        ]) {
-                            sh "npm ci && npm run lint"
-                        }
+                        sh """
+                            if [ -d node_modules ]; then
+                              echo "Using cached node_modules...";
+                            else
+                              npm ci;
+                            fi
+                            npm run lint
+                        """
                     }
                 }
                 stage('Unit Tests') {
                     steps {
-                        cache(maxCacheSize: 1, caches: [
-                            arbitraryFileCache(path: 'node_modules', cacheValidityDecidingFile: 'package-lock.json')
-                        ]) {
-                            sh "npm ci && npm run test -- --coverage"
-                        }
+                         sh """
+                            if [ -d node_modules ]; then
+                              echo "Using cached node_modules...";
+                            else
+                              npm ci;
+                            fi
+                            npm run test -- --coverage
+                        """
                     }
                 }
                 stage('Security Scan') {
                     steps {
-                        cache(maxCacheSize: 1, caches: [
-                            arbitraryFileCache(path: 'node_modules', cacheValidityDecidingFile: 'package-lock.json')
-                        ]) {
-                           sh "npm audit --audit-level=high"
-                        }
+                        sh """
+                            if [ -d node_modules ]; then
+                              echo "Using cached node_modules...";
+                            else
+                              npm ci;
+                            fi
+                            npm audit --audit-level=high
+                        """
                     }
                 }
             }
