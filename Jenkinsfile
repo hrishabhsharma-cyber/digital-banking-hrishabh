@@ -7,6 +7,9 @@ pipeline {
         ROLLBACK_DIR = "/var/lib/jenkins/rollback"
         LAST_SUCCESS_FILE = "${ROLLBACK_DIR}/LAST_SUCCESS"
         DOCKERHUB = credentials('dockerhub-credentials')
+        REGISTRY_HOST = "http://192.168.3.83:5001"
+        IMAGE_NAME = "${REGISTRY_HOST}/digital-banking"
+        DOCKER_REGISTRY_CREDS = credentials('private-registry')
     }
 
     stages {
@@ -70,6 +73,12 @@ pipeline {
         stage('Docker Build & Push') {
             steps {
                 echo "Building & pushing image ${IMAGE_NAME}:${IMAGE_TAG}"
+
+                sh """
+                    echo ${DOCKER_REGISTRY_CREDS_PSW} | \
+                    docker login ${REGISTRY_HOST} -u ${DOCKER_REGISTRY_CREDS_USR} --password-stdin
+                """
+
                 sh """
                     # Pull latest for caching
                     docker pull ${IMAGE_NAME}:latest || true
@@ -78,13 +87,14 @@ pipeline {
                         --cache-from=${IMAGE_NAME}:latest \
                         -t ${IMAGE_NAME}:${IMAGE_TAG} .
 
-                    echo ${DOCKERHUB_PSW} | docker login -u ${DOCKERHUB_USR} --password-stdin
-                    docker push ${IMAGE_NAME}:${IMAGE_TAG}
-
                     # Update latest tag for future cache builds
                     docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${IMAGE_NAME}:latest
+
+                    # Push both tags
+                    docker push ${IMAGE_NAME}:${IMAGE_TAG}
                     docker push ${IMAGE_NAME}:latest
 
+                    # Clean space
                     docker rmi ${IMAGE_NAME}:${IMAGE_TAG} || true
                     docker rmi ${IMAGE_NAME}:latest || true
 
