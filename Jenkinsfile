@@ -6,7 +6,7 @@ pipeline {
         ROLLBACK_DIR = "/var/lib/jenkins/rollback"
         LAST_SUCCESS_FILE = "${ROLLBACK_DIR}/LAST_SUCCESS"
         DOCKERHUB = credentials('dockerhub-credentials')
-        REGISTRY_HOST = "http://192.168.3.83:5001"
+        REGISTRY_HOST = "192.168.3.83:5001"
         IMAGE_NAME = "${REGISTRY_HOST}/digital-banking"
         DOCKER_REGISTRY_CREDS = credentials('private-registry')
     }
@@ -68,15 +68,24 @@ pipeline {
             }
         }
 
+        stage('Docker Login') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: 'private-registry',
+                    usernameVariable: 'REG_USER',
+                    passwordVariable: 'REG_PASS'
+                )]) {
+                    sh """
+                        echo "$REG_PASS" | docker login http://${REGISTRY_HOST} -u "$REG_USER" --password-stdin
+                    """
+                }
+            }
+        }
+
 
         stage('Docker Build & Push') {
             steps {
                 echo "Building & pushing image ${IMAGE_NAME}:${IMAGE_TAG}"
-
-                sh """
-                    echo ${DOCKER_REGISTRY_CREDS_PSW} | \
-                    docker login ${REGISTRY_HOST} -u ${DOCKER_REGISTRY_CREDS_USR} --password-stdin
-                """
 
                 sh """
                     # Pull latest for caching
