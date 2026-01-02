@@ -3,7 +3,7 @@ pipeline {
 
     environment {
         IMAGE_TAG = "${BUILD_NUMBER}"
-        IMAGE_NAME = "digital-banking"
+        IMAGE_NAME = "digital-banking-hrishabh"
         ROLLBACK_FOLDER = "${env.ROLLBACK_DIR}/Digital-Banking"
         LAST_SUCCESS_FILE = "${ROLLBACK_FOLDER}/LAST_SUCCESS"
         APP_PORT = "4001"
