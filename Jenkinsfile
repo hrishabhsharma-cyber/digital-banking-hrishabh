@@ -70,8 +70,7 @@ pipeline {
                     steps {
                         unstash 'build-artifacts'
                         sh """
-                            docker build -t ${REGISTRY_HOST}/${IMAGE_NAME}:${IMAGE_TAG} .
-                            docker tag ${REGISTRY_HOST}/${IMAGE_NAME}:${IMAGE_TAG} ${REGISTRY_HOST}/${IMAGE_NAME}:latest
+                            docker build --load -t ${REGISTRY_HOST}/${IMAGE_NAME}:${IMAGE_TAG} -t ${REGISTRY_HOST}/${IMAGE_NAME}:latest .
                             docker push ${REGISTRY_HOST}/${IMAGE_NAME}:${IMAGE_TAG}
                             docker push ${REGISTRY_HOST}/${IMAGE_NAME}:latest
                             docker rmi ${REGISTRY_HOST}/${IMAGE_NAME}:${IMAGE_TAG} ${REGISTRY_HOST}/${IMAGE_NAME}:latest || true
