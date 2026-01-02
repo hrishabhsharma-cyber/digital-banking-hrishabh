@@ -1,228 +1,110 @@
 pipeline {
-    agent any
+    agent none
 
     environment {
         IMAGE_TAG = "${BUILD_NUMBER}"
         IMAGE_NAME = "digital-banking"
         ROLLBACK_FOLDER = "${env.ROLLBACK_DIR}/Digital-Banking"
         LAST_SUCCESS_FILE = "${ROLLBACK_FOLDER}/LAST_SUCCESS"
+        APP_PORT = "4001"
     }
 
     stages {
-
-        stage('Init Rollback Dir') {
+        stage('Init') {
+            agent any
             steps {
-                sh '''
-                    mkdir -p ${ROLLBACK_FOLDER}
-                    [ -f ${LAST_SUCCESS_FILE} ] || echo "none" > ${LAST_SUCCESS_FILE}
-                '''
+                sh 'mkdir -p ${ROLLBACK_FOLDER} && [ -f ${LAST_SUCCESS_FILE} ] || echo "none" > ${LAST_SUCCESS_FILE}'
             }
         }
 
-        stage('CI Checks') {
-            parallel {
-                stage('Lint') {
+        // ═══════════════════════════════════════════
+        // CI Checks - Runs inside Node container agent
+        // ═══════════════════════════════════════════
+        stage('CI & Build') {
+            agent {
+                docker {
+                    image 'node:22-alpine'  // Project-specific Node version
+                    args '-v $HOME/.npm:/root/.npm'  // Cache npm globally
+                }
+            }
+            stages {
+                stage('Install Deps') {
+                    steps {
+                        sh 'npm ci'
+                    }
+                }
+                stage('CI Checks') {
+                    parallel {
+                        stage('Lint')     { steps { sh 'npm run lint' } }
+                        stage('Test')     { steps { sh 'npm run test -- --coverage' } }
+                        stage('Audit')    { steps { sh 'npm audit --audit-level=high || true' } }
+                    }
+                }
+                stage('Build') {
+                    steps {
+                        sh 'npm run build'
+                        stash includes: 'dist/**', name: 'build-artifacts'
+                    }
+                }
+            }
+        }
+
+        // ═══════════════════════════════════════════
+        // Docker stages - Runs on Jenkins agent
+        // ═══════════════════════════════════════════
+        stage('Docker') {
+            agent any
+            stages {
+                stage('Login') {
+                    steps {
+                        withCredentials([usernamePassword(
+                            credentialsId: 'registry-docker',
+                            usernameVariable: 'REG_USER',
+                            passwordVariable: 'REG_PASS'
+                        )]) {
+                            sh 'echo "$REG_PASS" | docker login ${REGISTRY_HOST} -u "$REG_USER" --password-stdin'
+                        }
+                    }
+                }
+                stage('Build & Push') {
+                    steps {
+                        unstash 'build-artifacts'
+                        sh """
+                            docker build -t ${REGISTRY_HOST}/${IMAGE_NAME}:${IMAGE_TAG} .
+                            docker tag ${REGISTRY_HOST}/${IMAGE_NAME}:${IMAGE_TAG} ${REGISTRY_HOST}/${IMAGE_NAME}:latest
+                            docker push ${REGISTRY_HOST}/${IMAGE_NAME}:${IMAGE_TAG}
+                            docker push ${REGISTRY_HOST}/${IMAGE_NAME}:latest
+                            docker rmi ${REGISTRY_HOST}/${IMAGE_NAME}:${IMAGE_TAG} ${REGISTRY_HOST}/${IMAGE_NAME}:latest || true
+                        """
+                    }
+                }
+                stage('Deploy') {
                     steps {
                         sh """
-                            if [ -d node_modules ]; then
-                              echo "Using cached node_modules...";
-                            else
-                              npm ci;
-                            fi
-                            npm run lint
+                            docker stop ${IMAGE_NAME} || true
+                            docker rm ${IMAGE_NAME} || true
+                            docker run -d --name ${IMAGE_NAME} \
+                                --restart unless-stopped \
+                                -p ${APP_PORT}:5000 -e PORT=5000 \
+                                ${REGISTRY_HOST}/${IMAGE_NAME}:${IMAGE_TAG}
+                            sleep 5
                         """
                     }
                 }
-                stage('Unit Tests') {
+                stage('Health Check') {
                     steps {
-                         sh """
-                            if [ -d node_modules ]; then
-                              echo "Using cached node_modules...";
-                            else
-                              npm ci;
-                            fi
-                            npm run test -- --coverage
-                        """
+                        script {
+                            def ip = sh(script: "docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' ${IMAGE_NAME}", returnStdout: true).trim()
+                            def status = sh(script: "curl -s -o /dev/null -w '%{http_code}' http://${ip}:5000/ || echo 000", returnStdout: true).trim()
+                            if (status != "200") { error("Health check failed: ${status}") }
+                        }
                     }
                 }
-                stage('Security Scan') {
+                stage('Save Version') {
                     steps {
-                        sh """
-                            if [ -d node_modules ]; then
-                              echo "Using cached node_modules...";
-                            else
-                              npm ci;
-                            fi
-                            npm audit --audit-level=high
-                        """
+                        sh "echo '${IMAGE_TAG}' > ${LAST_SUCCESS_FILE}"
                     }
                 }
-            }
-        }
-
-        stage('Build App') {
-            steps {
-                echo "Installing deps & building NestJS..."
-                sh """
-                    npm ci
-                    npm run build > build.log 2>&1 || {
-                        cp build.log error.log
-                        exit 1
-                    }
-                """
-                archiveArtifacts artifacts: 'dist/**', fingerprint: true
-            }
-        }
-
-        stage('Docker Login') {
-            steps {
-                withCredentials([usernamePassword(
-                    credentialsId: 'registry-docker',
-                    usernameVariable: 'REG_USER',
-                    passwordVariable: 'REG_PASS'
-                )]) {
-                    sh """
-                        echo "$REG_PASS" | docker login http://${REGISTRY_HOST} -u "$REG_USER" --password-stdin
-                    """
-                }
-            }
-        }
-
-
-        stage('Docker Build & Push') {
-            steps {
-                echo "Building & pushing image ${IMAGE_NAME}:${IMAGE_TAG}"
-
-                sh """
-                    # Pull latest for caching
-                    docker pull ${IMAGE_NAME}:latest || true
-
-                    docker build \
-                        --cache-from=${IMAGE_NAME}:latest \
-                        -t ${IMAGE_NAME}:${IMAGE_TAG} .
-
-                    # Update latest tag for future cache builds
-                    docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${IMAGE_NAME}:latest
-
-                    # Push both tags
-                    docker push ${IMAGE_NAME}:${IMAGE_TAG}
-                    docker push ${IMAGE_NAME}:latest
-
-                    # Clean space
-                    docker rmi ${IMAGE_NAME}:${IMAGE_TAG} || true
-                    docker rmi ${IMAGE_NAME}:latest || true
-
-                    rm -rf dist || true
-                """
-            }
-        }
-
-        stage('Detect Ports') {
-            steps {
-                script {
-                    BLUE = sh(
-                        script: '''
-                            if docker ps --format "{{.Ports}}" --filter "name=digital-banking-blue" | grep -q "4001->";
-                                then echo "4001"; else echo "4003";
-                            fi
-                        ''',
-                        returnStdout: true
-                    ).trim()
-
-                    CANARY = (BLUE == "4001") ? "4003" : "4001"
-
-                    env.BLUE_PORT = BLUE
-                    env.CANARY_PORT = CANARY
-
-                    echo "🔵 BLUE on ${BLUE}"
-                    echo "🟡 CANARY on ${CANARY}"
-                }
-            }
-        }
-
-        stage('Start Canary') {
-            steps {
-                echo "Starting Canary on ${env.CANARY_PORT}"
-                sh """
-                    docker stop digital-banking-canary || true
-                    docker rm digital-banking-canary || true
-
-                    docker run -d \
-                        --name digital-banking-canary \
-                        -p ${env.CANARY_PORT}:5000 \
-                        -e PORT=5000 \
-                        ${IMAGE_NAME}:${IMAGE_TAG}
-
-                    sleep 7
-                """
-            }
-        }
-
-        stage('Health Check Canary') {
-            steps {
-                script {
-                    def status = sh(
-                        script: "curl -s -o /dev/null -w '%{http_code}' http://localhost:${env.CANARY_PORT}/ || echo 000",
-                        returnStdout: true
-                    ).trim()
-
-                    echo "CANARY Health: ${status}"
-
-                    if (status != "200") {  
-                        error("CANARY FAILED health check")
-                    }
-                }
-            }
-        }
-
-        stage('Shift Traffic (90/10)') {
-            steps {
-                echo "Applying 90/10 traffic split..."
-                sh """
-                    sudo sed -i "s/server 127.0.0.1:${env.BLUE_PORT}.*/server 127.0.0.1:${env.BLUE_PORT} weight=90;/" /etc/nginx/sites-available/nest-proxy.conf
-                    sudo sed -i "s/server 127.0.0.1:${env.CANARY_PORT}.*/server 127.0.0.1:${env.CANARY_PORT} weight=10;/" /etc/nginx/sites-available/nest-proxy.conf
-                    sudo systemctl reload nginx
-                """
-                sleep 10
-            }
-        }
-
-        stage('Promote Canary → Production') {
-            steps {
-                script {
-                    echo "Checking CANARY after traffic shift..."
-
-                    def status = sh(
-                        script: "curl -s -o /dev/null -w '%{http_code}' http://localhost:${env.CANARY_PORT}/ || echo 000",
-                        returnStdout: true
-                    ).trim()
-
-                    if (status != "200") {
-                        error("CANARY degraded! Rolling back.")
-                    }
-
-                    echo "Promoting CANARY to 100% traffic..."
-                    sh """
-                        sudo sed -i "s/server 127.0.0.1:${env.BLUE_PORT}.*/server 127.0.0.1:${env.BLUE_PORT} weight=1;/" /etc/nginx/sites-available/nest-proxy.conf
-                        sudo sed -i "s/server 127.0.0.1:${env.CANARY_PORT}.*/server 127.0.0.1:${env.CANARY_PORT} weight=100;/" /etc/nginx/sites-available/nest-proxy.conf
-                        sudo nginx -t
-                        sudo systemctl reload nginx
-                    """
-                }
-            }
-        }
-
-        stage('Finalize Release') {
-            steps {
-                echo "Switching CANARY → BLUE and saving version"
-                sh """
-                    docker stop digital-banking-blue || true
-                    docker rm digital-banking-blue || true
-                    docker rename digital-banking-canary digital-banking-blue
-
-                    mkdir -p ${ROLLBACK_FOLDER}
-                    echo '${IMAGE_TAG}' > ${LAST_SUCCESS_FILE}
-                """
             }
         }
     }
@@ -230,56 +112,21 @@ pipeline {
     post {
         success { echo "🎉 SUCCESS: Released version ${IMAGE_TAG}" }
         failure {
-            script {
-                echo "❌ FAILURE DETECTED — Initiating rollback..."
-        
-                def lastTag = sh(script: "cat ${LAST_SUCCESS_FILE} || echo 'none'", returnStdout: true).trim()
-                if (lastTag == "none" || lastTag == "") {
-                    echo "⚠️ No LAST_SUCCESS version found. Cannot rollback."
-                    return
-                }
-        
-                echo "🔄 Rolling back to version: ${lastTag}"
-        
-                sh """
-                    echo "📥 Pulling stable image..."
-                    docker pull ${IMAGE_NAME}:${lastTag}
-                """
-        
-                sh """
-                    echo "🛑 Stopping failed containers..."
-                    docker stop digital-banking-blue || true
-                    docker rm digital-banking-blue || true
-        
-                    docker stop digital-banking-canary || true
-                    docker rm digital-banking-canary || true
-                """
-        
-                sh """
-                    echo "🚀 Starting rollback BLUE container..."
-                    docker run -d --name digital-banking-blue \\
-                        -p 4001:5000 -e PORT=5000 \\
-                        ${IMAGE_NAME}:${lastTag}
-                """
-        
-                sh """
-                    echo "🔧 Resetting Nginx to 100% BLUE..."
-                    sudo sed -i "s/server 127.0.0.1:4001.*/server 127.0.0.1:4001 weight=100;/" /etc/nginx/sites-available/nest-proxy.conf
-                    sudo sed -i "s/server 127.0.0.1:4003.*/server 127.0.0.1:4003 weight=1;/" /etc/nginx/sites-available/nest-proxy.conf
-                    sudo nginx -t
-                    sudo systemctl reload nginx
-                """
-        
-                def health = sh(script: "curl -s -o /dev/null -w '%{http_code}' http://localhost:4001/ || echo 000", returnStdout: true).trim()
-        
-                if (health != "200") {
-                    echo "🔥 ROLLBACK FAILED! BLUE is unhealthy even after rollback. Manual intervention required!"
-                } else {
-                    echo "✅ ROLLBACK SUCCESS — system restored to stable version ${lastTag}"
+            node('') {
+                script {
+                    def lastTag = sh(script: "cat ${LAST_SUCCESS_FILE} || echo 'none'", returnStdout: true).trim()
+                    if (lastTag != "none" && lastTag != "") {
+                        echo "🔄 Rolling back to: ${lastTag}"
+                        sh """
+                            docker stop ${IMAGE_NAME} || true
+                            docker rm ${IMAGE_NAME} || true
+                            docker run -d --name ${IMAGE_NAME} --restart unless-stopped \
+                                -p ${APP_PORT}:5000 -e PORT=5000 \
+                                ${REGISTRY_HOST}/${IMAGE_NAME}:${lastTag}
+                        """
+                    }
                 }
             }
         }
-
-        always  { echo "Pipeline finished." }
     }
 }
