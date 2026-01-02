@@ -3,8 +3,9 @@ pipeline {
 
     environment {
         IMAGE_TAG = "${BUILD_NUMBER}"
-        LAST_SUCCESS_FILE = "${env.ROLLBACK_DIR}/Digital-Banking/LAST_SUCCESS"
         IMAGE_NAME = "digital-banking"
+        ROLLBACK_FOLDER = "${env.ROLLBACK_DIR}/Digital-Banking"
+        LAST_SUCCESS_FILE = "${ROLLBACK_FOLDER}/LAST_SUCCESS"
     }
 
     stages {
@@ -12,7 +13,7 @@ pipeline {
         stage('Init Rollback Dir') {
             steps {
                 sh '''
-                    mkdir -p ${LAST_SUCCESS_FILE}
+                    mkdir -p ${ROLLBACK_FOLDER}
                     [ -f ${LAST_SUCCESS_FILE} ] || echo "none" > ${LAST_SUCCESS_FILE}
                 '''
             }
@@ -219,7 +220,7 @@ pipeline {
                     docker rm digital-banking-blue || true
                     docker rename digital-banking-canary digital-banking-blue
 
-                    mkdir -p ${LAST_SUCCESS_FILE}
+                    mkdir -p ${ROLLBACK_FOLDER}
                     echo '${IMAGE_TAG}' > ${LAST_SUCCESS_FILE}
                 """
             }
