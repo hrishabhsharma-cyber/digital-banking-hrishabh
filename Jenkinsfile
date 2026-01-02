@@ -4,6 +4,7 @@ pipeline {
     environment {
         IMAGE_TAG = "${BUILD_NUMBER}"
         IMAGE_NAME = "hrishabhambak/digital-banking-hrishabh"
+        CONTAINER_NAME = "digital-banking-hrishabh"
         ROLLBACK_FOLDER = "${env.ROLLBACK_DIR}/Digital-Banking"
         LAST_SUCCESS_FILE = "${ROLLBACK_FOLDER}/LAST_SUCCESS"
         APP_PORT = "4001"
@@ -80,9 +81,9 @@ pipeline {
                 stage('Deploy') {
                     steps {
                         sh """
-                            docker stop ${IMAGE_NAME} || true
-                            docker rm ${IMAGE_NAME} || true
-                            docker run -d --name ${IMAGE_NAME} \
+                            docker stop ${CONTAINER_NAME} || true
+                            docker rm ${CONTAINER_NAME} || true
+                            docker run -d --name ${CONTAINER_NAME} \
                                 --restart unless-stopped \
                                 -p ${APP_PORT}:5000 -e PORT=5000 \
                                 ${REGISTRY_HOST}/${IMAGE_NAME}:${IMAGE_TAG}
@@ -93,7 +94,7 @@ pipeline {
                 stage('Health Check') {
                     steps {
                         script {
-                            def ip = sh(script: "docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' ${IMAGE_NAME}", returnStdout: true).trim()
+                            def ip = sh(script: "docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' ${CONTAINER_NAME}", returnStdout: true).trim()
                             def status = sh(script: "curl -s -o /dev/null -w '%{http_code}' http://${ip}:5000/ || echo 000", returnStdout: true).trim()
                             if (status != "200") { error("Health check failed: ${status}") }
                         }
@@ -117,9 +118,9 @@ pipeline {
                     if (lastTag != "none" && lastTag != "") {
                         echo "🔄 Rolling back to: ${lastTag}"
                         sh """
-                            docker stop ${IMAGE_NAME} || true
-                            docker rm ${IMAGE_NAME} || true
-                            docker run -d --name ${IMAGE_NAME} --restart unless-stopped \
+                            docker stop ${CONTAINER_NAME} || true
+                            docker rm ${CONTAINER_NAME} || true
+                            docker run -d --name ${CONTAINER_NAME} --restart unless-stopped \
                                 -p ${APP_PORT}:5000 -e PORT=5000 \
                                 ${REGISTRY_HOST}/${IMAGE_NAME}:${lastTag}
                         """
