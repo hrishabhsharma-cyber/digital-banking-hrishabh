@@ -3,15 +3,20 @@ pipeline {
 
     environment {
         IMAGE_TAG = "${BUILD_NUMBER}"
-        ROLLBACK_DIR = "/var/lib/jenkins/rollback"
-        LAST_SUCCESS_FILE = "${ROLLBACK_DIR}/LAST_SUCCESS"
-        DOCKERHUB = credentials('dockerhub-credentials')
-        REGISTRY_HOST = "192.168.3.83:5001"
-        IMAGE_NAME = "${REGISTRY_HOST}/digital-banking"
-        DOCKER_REGISTRY_CREDS = credentials('private-registry')
+        LAST_SUCCESS_FILE = "${ROLLBACK_DIR}/Digital-Banking/LAST_SUCCESS"
+        IMAGE_NAME = "digital-banking"
     }
 
     stages {
+
+        stage('Init Rollback Dir') {
+            steps {
+                sh '''
+                    mkdir -p ${ROLLBACK_DIR}
+                    [ -f ${LAST_SUCCESS_FILE} ] || echo "none" > ${LAST_SUCCESS_FILE}
+                '''
+            }
+        }
 
         stage('CI Checks') {
             parallel {
@@ -71,7 +76,7 @@ pipeline {
         stage('Docker Login') {
             steps {
                 withCredentials([usernamePassword(
-                    credentialsId: 'private-registry',
+                    credentialsId: 'registry-docker',
                     usernameVariable: 'REG_USER',
                     passwordVariable: 'REG_PASS'
                 )]) {
