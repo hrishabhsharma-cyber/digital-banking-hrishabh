@@ -93,7 +93,7 @@ pipeline {
                 }
                 stage('Health Check') {
                     steps {
-                        sh "curl -sf --max-time 10 http://localhost:${APP_PORT}/ || exit 1"
+                        sh "for i in 1 2 3 4 5; do curl -sf --max-time 5 http://localhost:${APP_PORT}/ && exit 0 || sleep 3; done; exit 1"
                     }
                 }
                 stage('Save Version') {
