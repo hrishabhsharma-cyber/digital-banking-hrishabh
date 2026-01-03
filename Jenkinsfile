@@ -93,7 +93,10 @@ pipeline {
                 }
                 stage('Health Check') {
                     steps {
-                        sh "for i in 1 2 3 4 5; do curl -sf --max-time 5 http://localhost:${APP_PORT}/ && exit 0 || sleep 3; done; exit 1"
+                        sh """
+                            IP=\$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' ${CONTAINER_NAME})
+                            for i in 1 2 3 4 5; do curl -sf --max-time 5 http://\$IP:5000/ && exit 0 || sleep 3; done; exit 1
+                        """
                     }
                 }
                 stage('Save Version') {
