@@ -95,7 +95,7 @@ pipeline {
                     steps {
                         script {
                             def ip = sh(script: "docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' ${CONTAINER_NAME}", returnStdout: true).trim()
-                            def status = sh(script: "curl -s -o /dev/null -w '%{http_code}' http://${ip}:5000/ || echo 000", returnStdout: true).trim()
+                            def status = sh(script: "curl -s -o /dev/null -w '%{http_code}' --max-time 10 http://${ip}:5000/ || echo 000", returnStdout: true).trim()
                             if (status != "200") { error("Health check failed: ${status}") }
                         }
                     }
